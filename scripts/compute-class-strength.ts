@@ -3,14 +3,16 @@ dotenvConfig({ path: ".env.local" });
 dotenvConfig();
 import { createClient } from "@supabase/supabase-js";
 
-// Aggregate prospects by draft_year into per-year class strength multipliers.
+// Aggregate prospect_consensus by draft_year into per-year class strength
+// multipliers. Reads the cross-source consensus grade (built by
+// compute-prospect-consensus.ts) so scales across sources are already
+// normalized before we aggregate.
 //
 // Approach:
-//   - Take the top 10 consensus grades per year (sorted desc).
+//   - Take the top 10 normalized grades per year (sorted desc).
 //   - Compute the top-10 average grade per year.
 //   - Compute the cross-year mean of top-10 averages (the "neutral" class).
 //   - multiplier = clamp(1 + k * (year_avg - cross_year_mean) / scale, 0.9, 1.1)
-//     where k controls sensitivity and scale is a rough stddev.
 //
 // Years with fewer than 5 graded prospects get multiplier = 1.0 (not enough
 // signal to move off neutral).
@@ -31,19 +33,19 @@ async function main() {
   );
 
   const { data, error } = await sb
-    .from("prospects")
-    .select("draft_year, consensus_grade")
-    .not("consensus_grade", "is", null);
+    .from("prospect_consensus")
+    .select("draft_year, normalized_grade")
+    .not("normalized_grade", "is", null);
   if (error) throw error;
   const rows = (data ?? []) as Array<{
     draft_year: number;
-    consensus_grade: number;
+    normalized_grade: number;
   }>;
 
   const byYear = new Map<number, number[]>();
   for (const r of rows) {
     const arr = byYear.get(r.draft_year) ?? [];
-    arr.push(Number(r.consensus_grade));
+    arr.push(Number(r.normalized_grade));
     byYear.set(r.draft_year, arr);
   }
 

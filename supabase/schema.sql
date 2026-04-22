@@ -108,23 +108,49 @@ create table if not exists public.league_rosters (
 
 create index if not exists idx_league_rosters_league on public.league_rosters(league_id);
 
--- Pre-NFL-draft prospect rankings. Used to compute class strength per
--- draft_year, which in turn multiplies pick values. Populated by a
--- consensus-ingestion script (manual seed for now; data-source integration
--- is future work).
+-- Pre-NFL-draft prospect rankings. Raw per-source entries: one row per
+-- (prospect, source). Stack multiple sites (KTC, DLF, NFLMDD, etc.) for
+-- the same prospect and let the aggregation script build a consensus.
+--
+-- source values are free-form but should be stable per site (e.g. "KTC",
+-- "DLF_STAFF", "NFLMDD"). Ingestion upserts on (prospect_id, source).
+--
+-- If you had the single-PK version of this table, drop it first:
+--   drop table if exists public.prospects cascade;
 create table if not exists public.prospects (
-  prospect_id text primary key,
+  prospect_id text not null,
+  source text not null,
   draft_year int not null,
   name text not null,
   position text check (position in ('QB','RB','WR','TE')),
   consensus_grade numeric,
   projected_round int,
   projected_overall_pick int,
-  source text,
-  updated_at timestamptz default now()
+  updated_at timestamptz default now(),
+  primary key (prospect_id, source)
 );
 
 create index if not exists idx_prospects_year on public.prospects(draft_year);
+create index if not exists idx_prospects_id on public.prospects(prospect_id);
+
+-- Aggregated cross-source consensus. One row per prospect_id, computed by
+-- ranking each source's grades within the year, averaging ranks per
+-- prospect, and mapping back to a normalized 0-100 grade. Robust to
+-- different sources using different grade scales.
+create table if not exists public.prospect_consensus (
+  prospect_id text primary key,
+  draft_year int not null,
+  name text not null,
+  position text,
+  avg_rank numeric,            -- average across sources (1 = best)
+  normalized_grade numeric,    -- 0-100, derived from avg_rank via decay curve
+  source_count int not null,
+  projected_round int,
+  projected_overall_pick int,
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_prospect_consensus_year on public.prospect_consensus(draft_year);
 
 -- Cached per-year class strength aggregate. Derived from the prospects
 -- table but stored separately so the trade calc can read it cheaply without
@@ -150,6 +176,7 @@ alter table public.dpv_snapshots enable row level security;
 alter table public.leagues enable row level security;
 alter table public.league_rosters enable row level security;
 alter table public.prospects enable row level security;
+alter table public.prospect_consensus enable row level security;
 alter table public.class_strength enable row level security;
 
 drop policy if exists "public read players" on public.players;
@@ -182,6 +209,10 @@ create policy "public read league_rosters" on public.league_rosters
 
 drop policy if exists "public read prospects" on public.prospects;
 create policy "public read prospects" on public.prospects
+  for select to anon, authenticated using (true);
+
+drop policy if exists "public read prospect_consensus" on public.prospect_consensus;
+create policy "public read prospect_consensus" on public.prospect_consensus
   for select to anon, authenticated using (true);
 
 drop policy if exists "public read class_strength" on public.class_strength;

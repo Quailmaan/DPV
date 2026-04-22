@@ -8,24 +8,28 @@ import path from "node:path";
 // Ingest a CSV of consensus prospect rankings into public.prospects.
 //
 // CSV header (first row, case-insensitive; extra columns ignored):
-//   prospect_id,draft_year,name,position,consensus_grade,projected_round,projected_overall_pick,source
+//   prospect_id,source,draft_year,name,position,consensus_grade,projected_round,projected_overall_pick
 //
-// prospect_id should be stable across ingestion runs (e.g. slugified name).
-// Rows with the same prospect_id upsert; stale rows for a draft_year are NOT
-// deleted automatically — use a fresh source tag per ingestion if you want
-// to replace a year's data wholesale.
+// (prospect_id, source) is the composite primary key. Ingest the same CSV
+// from multiple sites (KTC, DLF, NFLMDD, etc.) and each site's take lives
+// alongside the others. After ingestion, run compute-prospect-consensus.ts
+// to build the cross-source aggregate.
+//
+// prospect_id should be stable across ingestion runs for the SAME prospect
+// (e.g. slugified full name — "cam-ward-2026"). Different sources should use
+// the SAME prospect_id for the SAME person so their grades aggregate.
 //
 // Usage: npx tsx scripts/ingest-prospects.ts <path-to-csv>
 
 type ProspectRow = {
   prospect_id: string;
+  source: string;
   draft_year: number;
   name: string;
   position: "QB" | "RB" | "WR" | "TE" | null;
   consensus_grade: number | null;
   projected_round: number | null;
   projected_overall_pick: number | null;
-  source: string | null;
 };
 
 function parseCsv(text: string): ProspectRow[] {
@@ -49,6 +53,7 @@ function parseCsv(text: string): ProspectRow[] {
 
   const required = [
     ["prospect_id", iId],
+    ["source", iSource],
     ["draft_year", iYear],
     ["name", iName],
   ] as const;
@@ -58,13 +63,17 @@ function parseCsv(text: string): ProspectRow[] {
 
   const rows: ProspectRow[] = [];
   for (const line of lines.slice(1)) {
+    if (line.startsWith("#")) continue; // allow comment lines
     const cols = line.split(",").map((c) => c.trim());
     const year = Number(cols[iYear]);
     if (!Number.isFinite(year)) continue;
+    const src = cols[iSource];
+    if (!src) continue; // source is required — skip unlabeled rows
     const pos = iPos >= 0 ? cols[iPos].toUpperCase() : "";
     const allowed = ["QB", "RB", "WR", "TE"];
     rows.push({
       prospect_id: cols[iId],
+      source: src,
       draft_year: year,
       name: cols[iName],
       position: allowed.includes(pos)
@@ -76,7 +85,6 @@ function parseCsv(text: string): ProspectRow[] {
         iRound >= 0 && cols[iRound] ? Number(cols[iRound]) : null,
       projected_overall_pick:
         iPick >= 0 && cols[iPick] ? Number(cols[iPick]) : null,
-      source: iSource >= 0 && cols[iSource] ? cols[iSource] : null,
     });
   }
   return rows;
@@ -116,7 +124,7 @@ async function main() {
     }));
     const { error } = await sb
       .from("prospects")
-      .upsert(chunk, { onConflict: "prospect_id" });
+      .upsert(chunk, { onConflict: "prospect_id,source" });
     if (error) throw error;
   }
   console.log(`Upserted ${rows.length} rows.`);

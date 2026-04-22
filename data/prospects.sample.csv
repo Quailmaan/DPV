@@ -1,13 +1,27 @@
-prospect_id,draft_year,name,position,consensus_grade,projected_round,projected_overall_pick,source
-# This is a template. Replace with real consensus rankings from a source like
-# NFLMockDraftDatabase, FantasyPros, or DLF. Keep prospect_id stable across
-# ingestions (slug of name + year) so updates upsert cleanly.
-# Grade scale is arbitrary but should be consistent within a year and ideally
-# across years — higher = better. 85+ = top-10 talent, 80+ = R1, 70+ = R2,
-# 60+ = mid-round, 50+ = late/UDFA flier.
-example-2026-wr-1,2026,Example WR Prospect,WR,88,1,5,sample
-example-2026-qb-1,2026,Example QB Prospect,QB,86,1,2,sample
-example-2026-rb-1,2026,Example RB Prospect,RB,83,1,14,sample
-example-2027-wr-1,2027,Example 2027 Top WR,WR,90,1,3,sample
-example-2027-qb-1,2027,Example 2027 Top QB,QB,89,1,1,sample
-example-2028-wr-1,2028,Example 2028 Top WR,WR,82,1,8,sample
+prospect_id,source,draft_year,name,position,consensus_grade,projected_round,projected_overall_pick
+# Multi-source prospect ranking sample. Each row is one SITE's take on one
+# prospect. The SAME prospect_id across different sources gets aggregated by
+# compute-prospect-consensus.ts into a single normalized grade.
+#
+# Workflow:
+#   1. Build your CSV with rows from multiple sites (KTC, DLF, NFLMDD, etc.).
+#      Use the same prospect_id for the same person across sources.
+#   2. npx tsx scripts/ingest-prospects.ts data/prospects.csv
+#   3. npx tsx scripts/compute-prospect-consensus.ts
+#   4. npx tsx scripts/compute-class-strength.ts
+#
+# Grades don't need to be on the same scale across sources — aggregation
+# converts each source's grades to ranks within the draft_year, averages
+# ranks per prospect, then maps back to a normalized 0-100 grade.
+#
+# Below: two prospects rated by three sites each. Grades vary in scale
+# (8000s for KTC, 90s for NFLMDD, 7s for a scout-style grade) — the
+# aggregator handles it.
+example-2026-qb-1,KTC,2026,Example QB Prospect,QB,8750,1,1
+example-2026-qb-1,DLF,2026,Example QB Prospect,QB,92,1,1
+example-2026-qb-1,NFLMDD,2026,Example QB Prospect,QB,7.1,1,2
+example-2026-wr-1,KTC,2026,Example WR Prospect,WR,8200,1,5
+example-2026-wr-1,DLF,2026,Example WR Prospect,WR,88,1,6
+example-2026-wr-1,NFLMDD,2026,Example WR Prospect,WR,6.8,1,4
+example-2027-qb-1,KTC,2027,Example 2027 QB,QB,9100,1,1
+example-2027-qb-1,DLF,2027,Example 2027 QB,QB,94,1,1
