@@ -69,9 +69,44 @@ export default async function PlayerPage({
     market?.market_value_normalized !== null && market?.market_value_normalized !== undefined
       ? Math.round(Number(market.market_value_normalized))
       : null;
+
+  // Compute position-scoped rank delta (intersection of players with both
+  // DPV + market in this format).
+  let dpvPosRank: number | null = null;
+  let mktPosRank: number | null = null;
+  if (marketValue !== null && snapshot?.dpv !== undefined) {
+    const [allDpvRes, allMktRes] = await Promise.all([
+      sb
+        .from("dpv_snapshots")
+        .select("player_id, dpv, players!inner(position)")
+        .eq("scoring_format", fmt)
+        .eq("players.position", player.position),
+      sb
+        .from("market_values")
+        .select("player_id, market_value_normalized, players!inner(position)")
+        .eq("scoring_format", fmt)
+        .eq("source", "fantasycalc")
+        .eq("players.position", player.position),
+    ]);
+    const mktMap = new Map<string, number>();
+    for (const m of allMktRes.data ?? []) {
+      if (m.market_value_normalized !== null) {
+        mktMap.set(m.player_id, Number(m.market_value_normalized));
+      }
+    }
+    const intersect = (allDpvRes.data ?? []).filter((s) =>
+      mktMap.has(s.player_id),
+    );
+    const dpvSorted = [...intersect].sort((a, b) => b.dpv - a.dpv);
+    const mktSorted = [...intersect].sort(
+      (a, b) => (mktMap.get(b.player_id) ?? 0) - (mktMap.get(a.player_id) ?? 0),
+    );
+    dpvPosRank = dpvSorted.findIndex((s) => s.player_id === id) + 1 || null;
+    mktPosRank = mktSorted.findIndex((s) => s.player_id === id) + 1 || null;
+  }
   const marketDelta =
-    marketValue !== null && snapshot?.dpv !== undefined && snapshot?.dpv !== null
-      ? snapshot.dpv - marketValue
+    dpvPosRank !== null && mktPosRank !== null
+      ? mktPosRank - dpvPosRank
       : null;
 
   return (
@@ -137,16 +172,29 @@ export default async function PlayerPage({
           <div className="text-sm mt-1">
             {marketDelta === null ? (
               <span className="text-zinc-500">No market data</span>
-            ) : marketDelta > 0 ? (
-              <span className="text-emerald-600 dark:text-emerald-400">
-                +{marketDelta} vs market (buy)
-              </span>
-            ) : marketDelta < 0 ? (
-              <span className="text-rose-600 dark:text-rose-400">
-                {marketDelta} vs market (sell)
-              </span>
             ) : (
-              <span className="text-zinc-500">In line with market</span>
+              <>
+                <span className="text-zinc-500">
+                  DPV {player.position}
+                  {dpvPosRank} · Market {player.position}
+                  {mktPosRank}
+                </span>
+                <span
+                  className={`ml-2 font-medium ${
+                    marketDelta > 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : marketDelta < 0
+                      ? "text-rose-600 dark:text-rose-400"
+                      : "text-zinc-500"
+                  }`}
+                >
+                  {marketDelta > 0
+                    ? `+${marketDelta} (buy)`
+                    : marketDelta < 0
+                    ? `${marketDelta} (sell)`
+                    : "aligned"}
+                </span>
+              </>
             )}
           </div>
         </div>

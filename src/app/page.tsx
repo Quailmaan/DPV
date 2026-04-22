@@ -38,8 +38,7 @@ export default async function RankingsPage({
         "dpv, tier, player_id, players(name, position, current_team, birthdate)",
       )
       .eq("scoring_format", fmt)
-      .order("dpv", { ascending: false })
-      .limit(300),
+      .order("dpv", { ascending: false }),
     sb
       .from("market_values")
       .select("player_id, market_value_normalized")
@@ -64,6 +63,24 @@ export default async function RankingsPage({
     }
   }
 
+  // Rank both DPV and market within the intersection of players (both have
+  // values), so the delta is rank-based and scale-free.
+  const intersect = (snapshots ?? []).filter((s) =>
+    marketByPlayer.has(s.player_id),
+  );
+  const dpvRanks = new Map<string, number>();
+  [...intersect]
+    .sort((a, b) => b.dpv - a.dpv)
+    .forEach((s, i) => dpvRanks.set(s.player_id, i + 1));
+  const mktRanks = new Map<string, number>();
+  [...intersect]
+    .sort(
+      (a, b) =>
+        (marketByPlayer.get(b.player_id) ?? 0) -
+        (marketByPlayer.get(a.player_id) ?? 0),
+    )
+    .forEach((s, i) => mktRanks.set(s.player_id, i + 1));
+
   type Row = {
     dpv: number;
     tier: string;
@@ -82,7 +99,8 @@ export default async function RankingsPage({
     .filter((r) => (pos === "ALL" ? true : r.players!.position === pos))
     .filter((r) =>
       q ? r.players!.name.toLowerCase().includes(q.toLowerCase()) : true,
-    );
+    )
+    .slice(0, 300);
 
   function ageFrom(bd: string | null): string {
     if (!bd) return "—";
@@ -184,7 +202,12 @@ export default async function RankingsPage({
             <tbody>
               {filtered.map((r, i) => {
                 const market = marketByPlayer.get(r.player_id);
-                const delta = market !== undefined ? r.dpv - Math.round(market) : null;
+                const dpvRank = dpvRanks.get(r.player_id);
+                const mktRank = mktRanks.get(r.player_id);
+                const delta =
+                  dpvRank !== undefined && mktRank !== undefined
+                    ? mktRank - dpvRank
+                    : null;
                 return (
                   <tr
                     key={r.player_id}
@@ -230,10 +253,10 @@ export default async function RankingsPage({
                         delta === null
                           ? "No market data"
                           : delta > 0
-                          ? "DPV sees more value than market (potential buy)"
+                          ? `DPV ranks ${delta} spots higher than market (potential buy)`
                           : delta < 0
-                          ? "Market values higher than DPV (potential sell)"
-                          : "In line with market"
+                          ? `Market ranks ${-delta} spots higher than DPV (potential sell)`
+                          : "Same rank in DPV and market"
                       }
                     >
                       {delta === null
