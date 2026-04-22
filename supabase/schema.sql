@@ -77,6 +77,14 @@ create table if not exists public.dpv_snapshots (
 
 create index if not exists idx_dpv_sorted on public.dpv_snapshots(scoring_format, dpv desc);
 
+create table if not exists public.hsm_comps (
+  player_id text not null references public.players(player_id) on delete cascade,
+  comps jsonb not null,
+  summary jsonb not null,
+  computed_at timestamptz default now(),
+  primary key (player_id)
+);
+
 -- ============================================================
 -- RLS
 -- ============================================================

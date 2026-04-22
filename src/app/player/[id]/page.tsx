@@ -35,7 +35,7 @@ export default async function PlayerPage({
 
   const sb = createServerClient();
 
-  const [playerRes, seasonsRes, snapshotRes, marketRes] = await Promise.all([
+  const [playerRes, seasonsRes, snapshotRes, marketRes, hsmRes] = await Promise.all([
     sb.from("players").select("*").eq("player_id", id).maybeSingle(),
     sb
       .from("player_seasons")
@@ -55,6 +55,11 @@ export default async function PlayerPage({
       .eq("scoring_format", fmt)
       .eq("source", "fantasycalc")
       .maybeSingle(),
+    sb
+      .from("hsm_comps")
+      .select("comps, summary")
+      .eq("player_id", id)
+      .maybeSingle(),
   ]);
 
   if (playerRes.error || !playerRes.data) return notFound();
@@ -63,6 +68,26 @@ export default async function PlayerPage({
   const seasons = seasonsRes.data ?? [];
   const snapshot = snapshotRes.data;
   const market = marketRes.data;
+  const hsm = hsmRes.data as
+    | {
+        comps: Array<{
+          playerId: string;
+          name: string;
+          anchorSeason: number;
+          anchorAge: number;
+          anchorPPG: number;
+          nextPPG: number | null;
+          similarity: number;
+        }>;
+        summary: {
+          n: number;
+          meanNextPPG: number | null;
+          medianNextPPG: number | null;
+          breakoutRate: number | null;
+          bustRate: number | null;
+        };
+      }
+    | null;
   const breakdown = snapshot?.breakdown as DPVBreakdown | undefined;
   const age = ageFromBirth(player.birthdate);
   const marketValue =
@@ -247,6 +272,117 @@ export default async function PlayerPage({
                     <td className="px-4 py-2 text-zinc-500">{label}</td>
                     <td className="px-4 py-2 text-right tabular-nums font-medium">
                       {value}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {hsm && hsm.comps.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-lg font-semibold">Historical Comps</h2>
+            <div className="text-xs text-zinc-500">
+              Cosine similarity on PPG · age · opportunity · context
+            </div>
+          </div>
+          {hsm.summary.n > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+                <div className="text-xs uppercase tracking-wider text-zinc-500">
+                  Mean Next PPG
+                </div>
+                <div className="text-2xl font-bold tabular-nums mt-1">
+                  {hsm.summary.meanNextPPG ?? "—"}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  Median {hsm.summary.medianNextPPG ?? "—"} · n={hsm.summary.n}
+                </div>
+              </div>
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+                <div className="text-xs uppercase tracking-wider text-zinc-500">
+                  Breakout Rate
+                </div>
+                <div className="text-2xl font-bold tabular-nums mt-1 text-emerald-600 dark:text-emerald-400">
+                  {hsm.summary.breakoutRate !== null
+                    ? `${Math.round(hsm.summary.breakoutRate * 100)}%`
+                    : "—"}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  {player.position === "QB" ? "≥20 PPG" : "≥15 PPG"}
+                </div>
+              </div>
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+                <div className="text-xs uppercase tracking-wider text-zinc-500">
+                  Bust Rate
+                </div>
+                <div className="text-2xl font-bold tabular-nums mt-1 text-rose-600 dark:text-rose-400">
+                  {hsm.summary.bustRate !== null
+                    ? `${Math.round(hsm.summary.bustRate * 100)}%`
+                    : "—"}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  {player.position === "QB" ? "≤14 PPG" : "≤8 PPG"}
+                </div>
+              </div>
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+                <div className="text-xs uppercase tracking-wider text-zinc-500">
+                  Top Similarity
+                </div>
+                <div className="text-2xl font-bold tabular-nums mt-1">
+                  {hsm.comps[0]
+                    ? hsm.comps[0].similarity.toFixed(3)
+                    : "—"}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  Closest historical match
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
+                <tr>
+                  <th className="px-3 py-2 text-left">Player</th>
+                  <th className="px-3 py-2 text-right">Season</th>
+                  <th className="px-3 py-2 text-right">Age</th>
+                  <th className="px-3 py-2 text-right">PPG</th>
+                  <th className="px-3 py-2 text-right">Next PPG</th>
+                  <th className="px-3 py-2 text-right">Similarity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hsm.comps.map((c, i) => (
+                  <tr
+                    key={`${c.playerId}-${c.anchorSeason}-${i}`}
+                    className="border-t border-zinc-100 dark:border-zinc-800"
+                  >
+                    <td className="px-3 py-2">
+                      <Link
+                        href={`/player/${c.playerId}?fmt=${fmt}`}
+                        className="font-medium hover:underline"
+                      >
+                        {c.name}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-500">
+                      {c.anchorSeason}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-500">
+                      {c.anchorAge}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {c.anchorPPG}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {c.nextPPG ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-medium">
+                      {c.similarity.toFixed(3)}
                     </td>
                   </tr>
                 ))}

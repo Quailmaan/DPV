@@ -168,6 +168,12 @@ async function main() {
     }
 
     const mostRecent = rawSeasons[0];
+    // Skip retired players — only rank players with a qualifying season
+    // within the last 2 years.
+    if (mostRecent.season < CURRENT_SEASON - 1) {
+      skipped++;
+      continue;
+    }
     const teamCtx = mostRecent.team
       ? teamIdx.get(`${mostRecent.team}|${mostRecent.season}`)
       : null;

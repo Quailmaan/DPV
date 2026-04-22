@@ -22,7 +22,7 @@ load_dotenv(ROOT / ".env.local")
 
 SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_SECRET_KEY = os.environ["SUPABASE_SECRET_KEY"]
-SEASONS = [2021, 2022, 2023, 2024, 2025]
+SEASONS = list(range(2013, 2026))
 POSITIONS = {"QB", "RB", "WR", "TE"}
 BATCH = 500
 
@@ -329,15 +329,27 @@ def ingest_snaps(seasons: list[int], pfr_to_gsis: dict[str, str]) -> None:
         updates.append({"player_id": pid, "season": int(r["season"]), "snap_share_pct": round(pct, 2)})
 
     print(f"  {len(updates)} snap-share updates (pfr:{matched_pfr}, name:{matched_name}, unmatched:{unmatched})")
-    applied = 0
+    # Dedupe: a player who changed teams mid-season may appear twice. Take
+    # the max snap share (captures primary-role team).
+    dedup: dict[tuple[str, int], dict] = {}
     for u in updates:
-        sb.table("player_seasons").update({"snap_share_pct": u["snap_share_pct"]}).eq(
-            "player_id", u["player_id"]
-        ).eq("season", u["season"]).execute()
-        applied += 1
-        if applied % 500 == 0:
-            print(f"  ... {applied}/{len(updates)} applied")
-    print(f"  snap shares applied: {applied}")
+        key = (u["player_id"], u["season"])
+        existing = dedup.get(key)
+        if existing is None or u["snap_share_pct"] > existing["snap_share_pct"]:
+            dedup[key] = u
+    updates = list(dedup.values())
+    print(f"  {len(updates)} after dedup")
+
+    existing_seasons = {
+        (r["player_id"], r["season"])
+        for r in fetch_all_rows("player_seasons", "player_id,season")
+    }
+    applicable = [u for u in updates if (u["player_id"], u["season"]) in existing_seasons]
+    print(f"  {len(applicable)} applicable (match existing player_seasons rows)")
+    for i in range(0, len(applicable), BATCH):
+        chunk = applicable[i : i + BATCH]
+        sb.table("player_seasons").upsert(chunk, on_conflict="player_id,season").execute()
+        print(f"  ... {min(i + BATCH, len(applicable))}/{len(applicable)} upserted")
 
 
 def ingest_team_context(seasons: list[int]) -> None:
