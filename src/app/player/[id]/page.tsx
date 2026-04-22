@@ -160,24 +160,33 @@ export default async function PlayerPage({
       ? Math.round(Number(market.market_value_normalized))
       : null;
 
-  // Compute position-scoped rank delta (intersection of players with both
-  // DPV + market in this format).
+  // Position-wide DPV + market fetch (used for position rank + market delta)
+  const [allDpvRes, allMktRes] = await Promise.all([
+    sb
+      .from("dpv_snapshots")
+      .select("player_id, dpv, players!inner(position)")
+      .eq("scoring_format", fmt)
+      .eq("players.position", player.position),
+    sb
+      .from("market_values")
+      .select("player_id, market_value_normalized, players!inner(position)")
+      .eq("scoring_format", fmt)
+      .eq("source", "fantasycalc")
+      .eq("players.position", player.position),
+  ]);
+
+  // Full position rank by DPV across all ranked players at this position.
+  const allDpvSorted = [...(allDpvRes.data ?? [])].sort(
+    (a, b) => b.dpv - a.dpv,
+  );
+  const positionTotal = allDpvSorted.length;
+  const positionRank =
+    allDpvSorted.findIndex((s) => s.player_id === id) + 1 || null;
+
+  // Rank delta within intersection of players with BOTH DPV and market.
   let dpvPosRank: number | null = null;
   let mktPosRank: number | null = null;
   if (marketValue !== null && snapshot?.dpv !== undefined) {
-    const [allDpvRes, allMktRes] = await Promise.all([
-      sb
-        .from("dpv_snapshots")
-        .select("player_id, dpv, players!inner(position)")
-        .eq("scoring_format", fmt)
-        .eq("players.position", player.position),
-      sb
-        .from("market_values")
-        .select("player_id, market_value_normalized, players!inner(position)")
-        .eq("scoring_format", fmt)
-        .eq("source", "fantasycalc")
-        .eq("players.position", player.position),
-    ]);
     const mktMap = new Map<string, number>();
     for (const m of allMktRes.data ?? []) {
       if (m.market_value_normalized !== null) {
@@ -301,13 +310,17 @@ export default async function PlayerPage({
         </div>
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
           <div className="text-xs uppercase tracking-wider text-zinc-500">
-            Age Modifier
+            Position Rank
           </div>
           <div className="text-4xl font-bold tabular-nums mt-1">
-            ×{breakdown?.ageModifier.toFixed(2) ?? "—"}
+            {positionRank !== null
+              ? `${player.position}${positionRank}`
+              : "—"}
           </div>
           <div className="text-sm text-zinc-500 mt-1">
-            Position-specific aging curve
+            {positionTotal > 0
+              ? `of ${positionTotal} ${player.position}s`
+              : "Unranked"}
           </div>
         </div>
       </div>
