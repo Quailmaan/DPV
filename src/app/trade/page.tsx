@@ -1,5 +1,6 @@
 import { createServerClient } from "@/lib/supabase/server";
 import type { ScoringFormat } from "@/lib/dpv/types";
+import { generatePickPlayers } from "@/lib/picks/values";
 import TradeCalculator, {
   type TradePlayer,
   type LeagueRosterOption,
@@ -70,7 +71,7 @@ export default async function TradePage({
     .order("dpv", { ascending: false });
 
   const now = Date.now();
-  const players: TradePlayer[] = (data ?? [])
+  const nflPlayers: TradePlayer[] = (data ?? [])
     .filter((r) => r.players)
     .map((r) => {
       const p = r.players as unknown as {
@@ -93,6 +94,12 @@ export default async function TradePage({
         tier: r.tier,
       };
     });
+
+  // Merge rookie picks into the tradeable pool. They're ranked alongside NFL
+  // players by DPV so the search dropdown blends them naturally.
+  const players: TradePlayer[] = [...nflPlayers, ...generatePickPlayers()].sort(
+    (a, b) => b.dpv - a.dpv,
+  );
 
   const fromId = fromRosterId ? Number(fromRosterId) : null;
 

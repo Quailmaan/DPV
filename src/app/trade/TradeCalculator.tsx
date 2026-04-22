@@ -296,9 +296,13 @@ function TradeSide({
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // Picks aren't tracked per-roster yet, so they remain tradeable regardless
+    // of which team the user has scoped the search to.
     const pool = players
       .filter((p) => !taken.has(p.id))
-      .filter((p) => (rosterPlayerIds ? rosterPlayerIds.has(p.id) : true));
+      .filter((p) =>
+        rosterPlayerIds ? rosterPlayerIds.has(p.id) || p.position === "PICK" : true,
+      );
     if (!q && !rosterPlayerIds) return [];
     if (!q && rosterPlayerIds) return pool.slice(0, 25);
     return pool.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 12);
@@ -382,12 +386,20 @@ function TradeSide({
               >
                 <span className="flex items-center gap-2">
                   <span className="font-medium">{p.name}</span>
-                  <span className="text-xs rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 font-mono">
+                  <span
+                    className={`text-xs rounded px-1.5 py-0.5 font-mono ${
+                      p.position === "PICK"
+                        ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+                        : "bg-zinc-100 dark:bg-zinc-800"
+                    }`}
+                  >
                     {p.position}
                   </span>
-                  <span className="text-xs text-zinc-500">
-                    {p.team ?? "—"}
-                  </span>
+                  {p.position !== "PICK" && (
+                    <span className="text-xs text-zinc-500">
+                      {p.team ?? "—"}
+                    </span>
+                  )}
                 </span>
                 <span className="tabular-nums font-semibold">{p.dpv}</span>
               </button>
@@ -402,24 +414,38 @@ function TradeSide({
         </div>
       ) : (
         <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {side.map((p, i) => (
+          {side.map((p, i) => {
+            const isPick = p.position === "PICK";
+            return (
             <li
               key={p.id}
               className="flex items-center justify-between gap-3 py-2"
             >
               <div className="flex items-center gap-2 min-w-0">
-                <Link
-                  href={`/player/${p.id}`}
-                  className="font-medium hover:underline truncate"
+                {isPick ? (
+                  <span className="font-medium truncate">{p.name}</span>
+                ) : (
+                  <Link
+                    href={`/player/${p.id}`}
+                    className="font-medium hover:underline truncate"
+                  >
+                    {p.name}
+                  </Link>
+                )}
+                <span
+                  className={`text-xs rounded px-1.5 py-0.5 font-mono flex-shrink-0 ${
+                    isPick
+                      ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+                      : "bg-zinc-100 dark:bg-zinc-800"
+                  }`}
                 >
-                  {p.name}
-                </Link>
-                <span className="text-xs rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 font-mono flex-shrink-0">
                   {p.position}
                 </span>
-                <span className="text-xs text-zinc-500 flex-shrink-0">
-                  {p.team ?? "—"} · {p.age ?? "—"}
-                </span>
+                {!isPick && (
+                  <span className="text-xs text-zinc-500 flex-shrink-0">
+                    {p.team ?? "—"} · {p.age ?? "—"}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-3 flex-shrink-0">
                 <span className="tabular-nums font-semibold">{p.dpv}</span>
@@ -435,7 +461,8 @@ function TradeSide({
                 </button>
               </div>
             </li>
-          ))}
+          );
+          })}
         </ul>
       )}
     </div>
