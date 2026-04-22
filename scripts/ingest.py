@@ -388,21 +388,39 @@ def ingest_team_context(seasons: list[int]) -> None:
             return 4
         return 5
 
+    rbs = weekly[weekly["position"] == "RB"].copy()
+    rbs["carries"] = pd.to_numeric(rbs.get("carries"), errors="coerce").fillna(0)
+    rbs["rushing_yards"] = pd.to_numeric(rbs.get("rushing_yards"), errors="coerce").fillna(0)
+    rb_team = (
+        rbs.groupby(["season", team_col])
+        .agg(team_carries=("carries", "sum"), team_rush_yd=("rushing_yards", "sum"))
+        .reset_index()
+    )
+    rb_team = rb_team[rb_team["team_carries"] >= 50].copy()
+    rb_team["ypc"] = rb_team["team_rush_yd"] / rb_team["team_carries"]
+    rb_team["oline_rank"] = (
+        rb_team.groupby("season")["ypc"].rank(ascending=False, method="min").astype(int)
+    )
+    oline_idx: dict[tuple[str, int], int] = {}
+    for _, r in rb_team.iterrows():
+        oline_idx[(r[team_col], int(r["season"]))] = int(r["oline_rank"])
+
     rows = []
     for _, r in team_qb.iterrows():
         team = r[team_col]
         if pd.isna(team):
             continue
+        season = int(r["season"])
         rows.append(
             {
                 "team": team,
-                "season": int(r["season"]),
+                "season": season,
                 "qb_tier": qb_tier(float(r["ppg"])),
-                "oline_composite_rank": None,
+                "oline_composite_rank": oline_idx.get((team, season)),
                 "team_offense_rank": None,
             }
         )
-    print(f"  {len(rows)} team-season rows")
+    print(f"  {len(rows)} team-season rows (oline ranks: {sum(1 for r in rows if r['oline_composite_rank'] is not None)})")
     batched_upsert("team_seasons", rows, on_conflict="team,season")
 
 

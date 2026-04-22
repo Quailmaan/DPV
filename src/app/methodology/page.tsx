@@ -49,9 +49,11 @@ DPV_normalized = round(DPV_final × 380)  // scaled to 0-10000`}
           <h2 className="font-semibold text-base">Situation Modifiers</h2>
           <ul className="list-disc pl-6 space-y-1">
             <li>
-              <b>O-Line Quality:</b> composite rank from multiple free sources
-              (ESPN RBWR/PBWR, FTN ALY, Next Gen Stats). Strong effect on RBs,
-              weak on QBs/WRs.
+              <b>O-Line Quality:</b> team rank (1-32 per season) derived from
+              RB yards-per-carry (min 50 carries to qualify). Strong effect on
+              RBs, weak on QBs/WRs. Note: YPC confounds RB talent and OL
+              quality; a future pass will add yards-before-contact from Next
+              Gen Stats.
             </li>
             <li>
               <b>QB Quality:</b> 5 tiers by starter fantasy PPG. Strong effect
@@ -74,12 +76,22 @@ DPV_normalized = round(DPV_final × 380)  // scaled to 0-10000`}
         </div>
 
         <div>
+          <h2 className="font-semibold text-base">Market Calibration</h2>
+          <p>
+            FantasyCalc dynasty trade values (1QB, same PPR setting) are
+            fetched per format and displayed alongside DPV with a delta column.
+            Green delta = DPV values the player higher than the market
+            (potential buy); red = market values higher (potential sell).
+          </p>
+        </div>
+
+        <div>
           <h2 className="font-semibold text-base">Planned (v2)</h2>
           <ul className="list-disc pl-6 space-y-1">
             <li>Historical Situation Matching (HSM) — cosine similarity comps</li>
-            <li>Market Calibration via FantasyCalc trade data</li>
             <li>Multi-year projections with age-adjusted composite</li>
-            <li>Live O-line composite index</li>
+            <li>Percentile-based market delta (normalized across scale gap)</li>
+            <li>Yards-before-contact (NGS) as truer OL signal</li>
           </ul>
         </div>
       </section>
