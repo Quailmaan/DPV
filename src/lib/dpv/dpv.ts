@@ -12,16 +12,34 @@ import {
   olineModifier,
   qbQualityModifier,
 } from "./situation";
-import type { DPVBreakdown, DPVInput, DPVResult } from "./types";
+import type { DPVBreakdown, DPVInput, DPVResult, Position } from "./types";
 
 const DPV_SCALE_CONSTANT = 380;
 const DPV_MAX = 10000;
 
-function classifyTier(dpv: number): string {
-  if (dpv >= 7500) return "Elite";
-  if (dpv >= 5000) return "Strong Starter";
-  if (dpv >= 2500) return "Flex/Depth";
-  if (dpv >= 1000) return "Bench Stash";
+// Rank-based tiers (12-team league starter counts per position).
+// Elite ≈ top starters, Strong Starter ≈ rest of weekly starters,
+// Flex/Depth ≈ flex/bench, Bench Stash ≈ deep roster, else Replacement.
+const TIER_THRESHOLDS: Record<
+  Position,
+  { elite: number; strong: number; flex: number; stash: number }
+> = {
+  QB: { elite: 6, strong: 14, flex: 24, stash: 36 },
+  RB: { elite: 8, strong: 20, flex: 36, stash: 60 },
+  WR: { elite: 12, strong: 30, flex: 50, stash: 80 },
+  TE: { elite: 6, strong: 12, flex: 20, stash: 30 },
+};
+
+function classifyTier(
+  position: Position,
+  positionRank: number | undefined,
+): string {
+  if (!positionRank) return "Replacement";
+  const t = TIER_THRESHOLDS[position];
+  if (positionRank <= t.elite) return "Elite";
+  if (positionRank <= t.strong) return "Strong Starter";
+  if (positionRank <= t.flex) return "Flex/Depth";
+  if (positionRank <= t.stash) return "Bench Stash";
   return "Replacement";
 }
 
@@ -91,7 +109,7 @@ export function calculateDPV(input: DPVInput): DPVResult {
     position,
     age,
     dpv: normalized,
-    tier: classifyTier(normalized),
+    tier: classifyTier(position, input.positionRank),
     breakdown,
   };
 }
