@@ -94,6 +94,19 @@ export default async function RankingsPage({
   };
 
   const rows = (snapshots ?? []) as unknown as Row[];
+
+  // Position rank assigned against the FULL position group (before filters),
+  // so search/filter doesn't renumber. Snapshots come sorted by DPV desc.
+  const positionRanks = new Map<string, number>();
+  const posCounters = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.players) continue;
+    const p = r.players.position;
+    const next = (posCounters.get(p) ?? 0) + 1;
+    posCounters.set(p, next);
+    positionRanks.set(r.player_id, next);
+  }
+
   const filtered = rows
     .filter((r) => r.players)
     .filter((r) => (pos === "ALL" ? true : r.players!.position === pos))
@@ -188,7 +201,7 @@ export default async function RankingsPage({
           <table className="w-full text-sm">
             <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
               <tr>
-                <th className="px-4 py-2 text-left w-12">#</th>
+                <th className="px-4 py-2 text-left w-16">#</th>
                 <th className="px-4 py-2 text-left">Player</th>
                 <th className="px-4 py-2 text-left w-16">Pos</th>
                 <th className="px-4 py-2 text-left w-20">Team</th>
@@ -200,7 +213,7 @@ export default async function RankingsPage({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r, i) => {
+              {filtered.map((r) => {
                 const market = marketByPlayer.get(r.player_id);
                 const dpvRank = dpvRanks.get(r.player_id);
                 const mktRank = mktRanks.get(r.player_id);
@@ -208,12 +221,17 @@ export default async function RankingsPage({
                   dpvRank !== undefined && mktRank !== undefined
                     ? mktRank - dpvRank
                     : null;
+                const posRank = positionRanks.get(r.player_id);
                 return (
                   <tr
                     key={r.player_id}
                     className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                   >
-                    <td className="px-4 py-2 text-zinc-400 tabular-nums">{i + 1}</td>
+                    <td className="px-4 py-2 text-zinc-400 tabular-nums">
+                      {posRank !== undefined
+                        ? `${r.players!.position}${posRank}`
+                        : "—"}
+                    </td>
                     <td className="px-4 py-2 font-medium">
                       <Link
                         href={`/player/${r.player_id}?fmt=${fmt}`}
