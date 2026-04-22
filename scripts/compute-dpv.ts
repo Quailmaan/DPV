@@ -4,6 +4,10 @@ dotenvConfig();
 import { createClient } from "@supabase/supabase-js";
 import { calculateDPV } from "../src/lib/dpv/dpv";
 import { CURRENT_SEASON } from "../src/lib/dpv/constants";
+import {
+  computeRookiePrior,
+  rookiePriorTier,
+} from "../src/lib/dpv/rookie-prior";
 import type {
   DPVInput,
   Position,
@@ -88,6 +92,8 @@ async function main() {
     position: string;
     birthdate: string | null;
     current_team: string | null;
+    draft_round: number | null;
+    draft_year: number | null;
   }>("players");
   console.log(`  ${players.length} players`);
 
@@ -157,7 +163,17 @@ async function main() {
   };
 
   let computed = 0;
+  let priored = 0;
   let skipped = 0;
+
+  // Pre-collect rookie prior rows so they write alongside the ranked snapshots.
+  const priorSnapshots: Array<{
+    player_id: string;
+    scoring_format: ScoringFormat;
+    dpv: number;
+    tier: string;
+    breakdown: unknown;
+  }> = [];
 
   for (const p of players) {
     if (!["QB", "RB", "WR", "TE"].includes(p.position)) {
@@ -175,8 +191,44 @@ async function main() {
       .filter((s) => s.games_played >= 7)
       .sort((a, b) => b.season - a.season);
 
+    // Rookie prior path: no qualifying NFL season yet, but drafted recently
+    // enough to be a dynasty asset. Emits a forward-looking prior so they
+    // appear in rankings and are tradeable.
     if (rawSeasons.length === 0) {
-      skipped++;
+      const isRecentDraftee =
+        p.draft_year !== null && p.draft_year >= CURRENT_SEASON - 1;
+      if (!isRecentDraftee) {
+        skipped++;
+        continue;
+      }
+      const situationTeam = p.current_team;
+      const teamCtx = situationTeam
+        ? teamIdx.get(`${situationTeam}|${CURRENT_SEASON}`) ?? null
+        : null;
+      const ageAtDraft =
+        p.draft_year !== null && p.birthdate
+          ? (new Date(`${p.draft_year}-04-25`).getTime() -
+              new Date(p.birthdate).getTime()) /
+            (365.25 * 24 * 3600 * 1000)
+          : age;
+      for (const fmt of FORMATS) {
+        const prior = computeRookiePrior({
+          position: p.position as Position,
+          draftRound: p.draft_round,
+          ageAtDraft,
+          teamOLineRank: teamCtx?.oline_composite_rank ?? null,
+          qbTier: (teamCtx?.qb_tier ?? null) as QBTier | null,
+          scoringFormat: fmt,
+        });
+        priorSnapshots.push({
+          player_id: p.player_id,
+          scoring_format: fmt,
+          dpv: prior.dpv,
+          tier: rookiePriorTier(p.position as Position, p.draft_round),
+          breakdown: prior.breakdown,
+        });
+      }
+      priored++;
       continue;
     }
 
@@ -244,7 +296,9 @@ async function main() {
     computed++;
   }
 
-  console.log(`  computed: ${computed}, skipped: ${skipped}`);
+  console.log(
+    `  computed: ${computed}, rookie priors: ${priored}, skipped: ${skipped}`,
+  );
 
   console.log("Ranking by position and re-running with scarcity...");
   const ranked: Array<{
@@ -278,10 +332,15 @@ async function main() {
     }
   }
 
+  // Merge rookie priors into the ranked set. They're ranked by prior DPV
+  // inside each position alongside veterans so positional tier ordering is
+  // consistent (rookie R1 RB slots in among mid-tier RB1/2s, etc.).
+  const combined = [...ranked, ...priorSnapshots];
+
   console.log("Writing dpv_snapshots...");
   const BATCH = 500;
-  for (let i = 0; i < ranked.length; i += BATCH) {
-    const chunk = ranked.slice(i, i + BATCH);
+  for (let i = 0; i < combined.length; i += BATCH) {
+    const chunk = combined.slice(i, i + BATCH);
     const { error } = await sb
       .from("dpv_snapshots")
       .upsert(chunk, { onConflict: "player_id,scoring_format" });
@@ -290,7 +349,7 @@ async function main() {
       process.exit(1);
     }
   }
-  console.log(`  wrote ${ranked.length} snapshots`);
+  console.log(`  wrote ${combined.length} snapshots`);
   console.log("Done.");
 }
 

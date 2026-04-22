@@ -153,7 +153,28 @@ export default async function PlayerPage({
         };
       }
     | null;
-  const breakdown = snapshot?.breakdown as DPVBreakdown | undefined;
+  type RookiePriorBreakdown = {
+    kind: "rookie_prior";
+    base: number;
+    oLineMult: number;
+    qbTierMult: number;
+    ageMult: number;
+    formatMult: number;
+  };
+  const rawBreakdown = snapshot?.breakdown as
+    | DPVBreakdown
+    | RookiePriorBreakdown
+    | undefined;
+  const isRookiePrior =
+    rawBreakdown !== undefined &&
+    "kind" in rawBreakdown &&
+    rawBreakdown.kind === "rookie_prior";
+  const breakdown: DPVBreakdown | undefined = isRookiePrior
+    ? undefined
+    : (rawBreakdown as DPVBreakdown | undefined);
+  const priorBreakdown: RookiePriorBreakdown | undefined = isRookiePrior
+    ? (rawBreakdown as RookiePriorBreakdown)
+    : undefined;
   const age = ageFromBirth(player.birthdate);
   const marketValue =
     market?.market_value_normalized !== null && market?.market_value_normalized !== undefined
@@ -299,13 +320,17 @@ export default async function PlayerPage({
         </div>
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
           <div className="text-xs uppercase tracking-wider text-zinc-500">
-            BPS (3-yr weighted PPG)
+            {isRookiePrior ? "Rookie Prior" : "BPS (3-yr weighted PPG)"}
           </div>
           <div className="text-4xl font-bold tabular-nums mt-1">
-            {breakdown?.bps.toFixed(1) ?? "—"}
+            {isRookiePrior
+              ? "—"
+              : breakdown?.bps.toFixed(1) ?? "—"}
           </div>
           <div className="text-sm text-zinc-500 mt-1">
-            Recency-weighted fantasy PPG
+            {isRookiePrior
+              ? "Forward-looking estimate (no NFL season yet)"
+              : "Recency-weighted fantasy PPG"}
           </div>
         </div>
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
@@ -324,6 +349,55 @@ export default async function PlayerPage({
           </div>
         </div>
       </div>
+
+      {priorBreakdown && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-3">Rookie Prior</h2>
+          <div className="rounded-md border border-amber-200 dark:border-amber-900/60 bg-amber-50/40 dark:bg-amber-950/20 p-4 mb-3 text-sm text-amber-900 dark:text-amber-200">
+            This player has no qualifying NFL season yet. DPV is a
+            forward-looking prior based on draft capital, landing spot, and
+            age. Replaced by a production-based DPV as soon as they log 7+
+            games in a season.
+          </div>
+          <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
+            <table className="w-full text-sm">
+              <tbody>
+                {(
+                  [
+                    [
+                      "Draft Capital (base)",
+                      priorBreakdown.base.toLocaleString(),
+                    ],
+                    [
+                      "Offensive Line",
+                      `×${priorBreakdown.oLineMult.toFixed(2)}`,
+                    ],
+                    [
+                      "QB Situation",
+                      `×${priorBreakdown.qbTierMult.toFixed(2)}`,
+                    ],
+                    ["Age at Draft", `×${priorBreakdown.ageMult.toFixed(2)}`],
+                    [
+                      "Format Adjust",
+                      `×${priorBreakdown.formatMult.toFixed(2)}`,
+                    ],
+                  ] as Array<[string, string]>
+                ).map(([label, value]) => (
+                  <tr
+                    key={label}
+                    className="border-t border-zinc-100 dark:border-zinc-800 first:border-t-0"
+                  >
+                    <td className="px-4 py-2 text-zinc-500">{label}</td>
+                    <td className="px-4 py-2 text-right font-medium tabular-nums">
+                      {value}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {breakdown && (
         <div className="mb-8">
