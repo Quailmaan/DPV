@@ -1,5 +1,17 @@
 import type { Position, ScoringFormat, QBTier, QBTransition } from "./types";
 
+export const CURRENT_SEASON = 2025;
+
+// Per-season trust factor based on games played. 15-17 = treated as a full
+// year (random 1-2 game injuries shouldn't punish a healthy year). Below
+// that, the sample shrinks and we downweight toward PPG noise.
+export function gameReliability(games: number): number {
+  if (games >= 15) return 1.0;
+  if (games >= 13) return 0.95;
+  if (games >= 10) return 0.85;
+  return 0.72;
+}
+
 export const PPG_SCORING: Record<
   ScoringFormat,
   {
@@ -101,22 +113,22 @@ export const AGE_MODIFIERS: Record<Position, Record<number, number>> = {
     33: 0.35,
   },
   QB: {
-    21: 0.9,
-    22: 0.9,
-    23: 1.05,
-    24: 1.05,
-    25: 1.1,
-    26: 1.1,
-    27: 1.1,
+    21: 0.8,
+    22: 0.85,
+    23: 0.9,
+    24: 0.95,
+    25: 1.0,
+    26: 1.03,
+    27: 1.07,
     28: 1.1,
-    29: 1.0,
-    30: 1.0,
-    31: 1.0,
-    32: 1.0,
-    33: 0.85,
-    34: 0.85,
-    35: 0.85,
-    36: 0.6,
+    29: 1.1,
+    30: 1.1,
+    31: 1.08,
+    32: 1.05,
+    33: 0.95,
+    34: 0.9,
+    35: 0.82,
+    36: 0.7,
   },
 };
 

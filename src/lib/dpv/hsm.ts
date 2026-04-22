@@ -17,8 +17,14 @@ export function runHSM(input: DPVInput): HSMResult {
       analogs: [],
     };
   }
-  const confidence: HSMResult["confidence"] =
+  let confidence: HSMResult["confidence"] =
     pre.n >= 6 ? "HIGH" : pre.n >= 4 ? "MEDIUM" : "LOW";
+  // QBs with <3 qualifying seasons have noisy track records — cap HSM
+  // confidence so more weight falls on the comp-projected PPG, not their
+  // thin raw sample.
+  if (input.profile.position === "QB" && input.seasons.length < 3) {
+    if (confidence === "HIGH") confidence = "MEDIUM";
+  }
   // Use median (more robust to outlier comps) blended slightly toward mean.
   const projectedPPG =
     pre.medianNextPPG !== null

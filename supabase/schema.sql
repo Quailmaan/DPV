@@ -85,6 +85,29 @@ create table if not exists public.hsm_comps (
   primary key (player_id)
 );
 
+create table if not exists public.leagues (
+  league_id text primary key,
+  name text not null,
+  season text,
+  total_rosters int,
+  scoring_format text check (scoring_format in ('STANDARD','HALF_PPR','FULL_PPR')),
+  raw_settings jsonb,
+  synced_at timestamptz not null default now()
+);
+
+create table if not exists public.league_rosters (
+  league_id text not null references public.leagues(league_id) on delete cascade,
+  roster_id int not null,
+  owner_user_id text,
+  owner_display_name text,
+  team_name text,
+  player_ids text[] not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (league_id, roster_id)
+);
+
+create index if not exists idx_league_rosters_league on public.league_rosters(league_id);
+
 -- ============================================================
 -- RLS
 -- ============================================================
@@ -94,6 +117,8 @@ alter table public.player_seasons enable row level security;
 alter table public.team_seasons enable row level security;
 alter table public.market_values enable row level security;
 alter table public.dpv_snapshots enable row level security;
+alter table public.leagues enable row level security;
+alter table public.league_rosters enable row level security;
 
 drop policy if exists "public read players" on public.players;
 create policy "public read players" on public.players
@@ -113,4 +138,12 @@ create policy "public read market_values" on public.market_values
 
 drop policy if exists "public read dpv_snapshots" on public.dpv_snapshots;
 create policy "public read dpv_snapshots" on public.dpv_snapshots
+  for select to anon, authenticated using (true);
+
+drop policy if exists "public read leagues" on public.leagues;
+create policy "public read leagues" on public.leagues
+  for select to anon, authenticated using (true);
+
+drop policy if exists "public read league_rosters" on public.league_rosters;
+create policy "public read league_rosters" on public.league_rosters
   for select to anon, authenticated using (true);

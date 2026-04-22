@@ -331,16 +331,27 @@ export default async function PlayerPage({
           <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
             <table className="w-full text-sm">
               <tbody>
-                {[
-                  ["Production", bpsLabel(player.position, breakdown.bps)],
-                  ["Age Curve", ageModifierLabel(breakdown.ageModifier)],
-                  ["Opportunity", opportunityLabel(breakdown.opportunityScore)],
-                  ["Offensive Line", olineLabel(breakdown.olineModifier)],
-                  ["QB Situation", qbLabel(breakdown.qbQualityModifier)],
-                  ["Consistency", bbcsLabel(breakdown.bbcsModifier)],
-                  ["Positional Scarcity", scarcityLabel(breakdown.scarcityMultiplier)],
-                  ["Historical Comps", hsmLabel(breakdown.hsmConfidence)],
-                ].map(([label, value]) => (
+                {(
+                  [
+                    ["Production", bpsLabel(player.position, breakdown.bps)],
+                    ["Age Curve", ageModifierLabel(breakdown.ageModifier)],
+                    player.position !== "QB" && [
+                      "Opportunity",
+                      opportunityLabel(breakdown.opportunityScore),
+                    ],
+                    ["Offensive Line", olineLabel(breakdown.olineModifier)],
+                    player.position !== "QB" && [
+                      "QB Situation",
+                      qbLabel(breakdown.qbQualityModifier),
+                    ],
+                    ["Consistency", bbcsLabel(breakdown.bbcsModifier)],
+                    [
+                      "Positional Scarcity",
+                      scarcityLabel(breakdown.scarcityMultiplier),
+                    ],
+                    ["Historical Comps", hsmLabel(breakdown.hsmConfidence)],
+                  ].filter(Boolean) as Array<[string, string]>
+                ).map(([label, value]) => (
                   <tr
                     key={label}
                     className="border-t border-zinc-100 dark:border-zinc-800 first:border-t-0"

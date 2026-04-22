@@ -3,6 +3,7 @@ dotenvConfig({ path: ".env.local" });
 dotenvConfig();
 import { createClient } from "@supabase/supabase-js";
 import { calculateDPV } from "../src/lib/dpv/dpv";
+import { CURRENT_SEASON } from "../src/lib/dpv/constants";
 import type {
   DPVInput,
   Position,
@@ -25,7 +26,6 @@ const sb = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
 
 const FORMATS: ScoringFormat[] = ["STANDARD", "HALF_PPR", "FULL_PPR"];
 const TODAY = new Date("2026-04-22");
-const CURRENT_SEASON = 2025;
 
 function computeAge(birthdate: string | null): number | null {
   if (!birthdate) return null;

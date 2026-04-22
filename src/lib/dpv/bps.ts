@@ -1,4 +1,9 @@
-import { BPS_WEIGHTS, PPG_SCORING } from "./constants";
+import {
+  BPS_WEIGHTS,
+  CURRENT_SEASON,
+  PPG_SCORING,
+  gameReliability,
+} from "./constants";
 import type { Position, ScoringFormat, SeasonStats } from "./types";
 
 export function seasonPPG(
@@ -25,20 +30,48 @@ export function calculateBPS(
   position: Position,
   format: ScoringFormat,
 ): number {
+  // Hard recency window: a "3-year BPS" means the last 3 calendar years, not
+  // "3 most recent seasons played." Skipping years shouldn't silently drag in
+  // ancient production (e.g., Watson's 2019/2020 showing up in 2026 rankings).
   const qualifying = seasons
     .filter((s) => s.gamesPlayed >= 7)
+    .filter((s) => s.season >= CURRENT_SEASON - 3)
     .sort((a, b) => b.season - a.season)
     .slice(0, 3);
 
   if (qualifying.length === 0) return 0;
 
-  const ppgs = qualifying.map((s) => seasonPPG(s, format));
+  // Per-season PPG with reliability weighting — 7-game samples count less.
+  const adjPpgs = qualifying.map(
+    (s) => seasonPPG(s, format) * gameReliability(s.gamesPlayed),
+  );
 
-  if (qualifying.length === 1) return ppgs[0];
-  if (qualifying.length === 2) return ppgs[0] * 0.6 + ppgs[1] * 0.4;
+  // QBs stabilize slowly — a rookie or sophomore season is a noisy baseline.
+  // Discount BPS for short track records so one hot year doesn't read the same
+  // as a proven multi-year sample.
+  const qbSmallSamplePenalty =
+    position === "QB"
+      ? qualifying.length === 1
+        ? 0.85
+        : qualifying.length === 2
+        ? 0.92
+        : 1.0
+      : 1.0;
+
+  // Missed-season penalty — if the player has no qualifying season in the
+  // current year, their projection carries rust/injury risk. Applies across
+  // positions.
+  const missedCurrentSeasonPenalty =
+    qualifying[0].season < CURRENT_SEASON ? 0.85 : 1.0;
+
+  const basePenalty = qbSmallSamplePenalty * missedCurrentSeasonPenalty;
+
+  if (qualifying.length === 1) return adjPpgs[0] * basePenalty;
+  if (qualifying.length === 2)
+    return (adjPpgs[0] * 0.6 + adjPpgs[1] * 0.4) * basePenalty;
 
   const [w0, w1, w2] = BPS_WEIGHTS[position];
-  return ppgs[0] * w0 + ppgs[1] * w1 + ppgs[2] * w2;
+  return (adjPpgs[0] * w0 + adjPpgs[1] * w1 + adjPpgs[2] * w2) * basePenalty;
 }
 
 export function weeklyCoefficientOfVariation(
