@@ -1,0 +1,32 @@
+name: Refresh rankings
+
+on:
+  schedule:
+    # 11:00 UTC = 7:00 AM EDT / 6:00 AM EST
+    - cron: "0 11 * * *"
+    # 23:00 UTC = 7:00 PM EDT / 6:00 PM EST
+    - cron: "0 23 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Sync current teams from Sleeper
+        run: npx tsx scripts/sync-teams.ts
+      - name: Recompute DPV snapshots
+        run: npx tsx scripts/compute-dpv.ts
