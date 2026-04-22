@@ -22,6 +22,71 @@ function ageFromBirth(bd: string | null): number | null {
   );
 }
 
+function bpsLabel(position: string, ppg: number): string {
+  const elite = position === "QB" ? 22 : 15;
+  const strong = position === "QB" ? 18 : 12;
+  const solid = position === "QB" ? 14 : 8;
+  if (ppg >= elite) return "Elite producer";
+  if (ppg >= strong) return "Strong producer";
+  if (ppg >= solid) return "Solid producer";
+  return "Low producer";
+}
+
+function ageModifierLabel(v: number): string {
+  if (v >= 1.15) return "Ascending";
+  if (v >= 1.05) return "In prime";
+  if (v >= 0.95) return "Mature";
+  if (v >= 0.85) return "Aging";
+  return "Late career";
+}
+
+function opportunityLabel(v: number): string {
+  if (v >= 0.7) return "Workhorse role";
+  if (v >= 0.5) return "High volume";
+  if (v >= 0.35) return "Moderate role";
+  if (v >= 0.2) return "Rotational";
+  return "Limited touches";
+}
+
+function olineLabel(v: number): string {
+  if (v >= 1.1) return "Strong front";
+  if (v >= 1.03) return "Above average";
+  if (v >= 0.97) return "Average";
+  if (v >= 0.9) return "Below average";
+  return "Weak front";
+}
+
+function qbLabel(v: number): string {
+  if (v >= 1.15) return "Elite QB play";
+  if (v >= 1.05) return "Above average";
+  if (v >= 0.95) return "Neutral";
+  if (v >= 0.85) return "Below average";
+  return "Weak QB";
+}
+
+function bbcsLabel(v: number): string {
+  if (v >= 1.05) return "Consistent";
+  if (v >= 0.98) return "Balanced";
+  if (v >= 0.9) return "Volatile";
+  return "Boom or bust";
+}
+
+function scarcityLabel(v: number): string {
+  if (v >= 1.15) return "Very scarce";
+  if (v >= 1.05) return "Scarce";
+  if (v >= 0.95) return "Neutral";
+  if (v >= 0.85) return "Deep position";
+  return "Abundant";
+}
+
+function hsmLabel(v: string): string {
+  const c = v.toUpperCase();
+  if (c === "HIGH") return "High confidence";
+  if (c === "MEDIUM") return "Medium confidence";
+  if (c === "LOW") return "Low confidence";
+  return "No comps";
+}
+
 export default async function PlayerPage({
   params,
   searchParams,
@@ -254,23 +319,21 @@ export default async function PlayerPage({
             <table className="w-full text-sm">
               <tbody>
                 {[
-                  ["Base Production Score", breakdown.bps.toFixed(2)],
-                  ["Age Modifier", `×${breakdown.ageModifier.toFixed(3)}`],
-                  ["Opportunity Score", breakdown.opportunityScore.toFixed(3)],
-                  ["O-Line Modifier", `×${breakdown.olineModifier.toFixed(3)}`],
-                  ["QB Quality Modifier", `×${breakdown.qbQualityModifier.toFixed(3)}`],
-                  ["Boom/Bust Modifier", `×${breakdown.bbcsModifier.toFixed(3)}`],
-                  ["Scoring Format Weight", `×${breakdown.scoringFormatWeight.toFixed(3)}`],
-                  ["Positional Scarcity", `×${breakdown.scarcityMultiplier.toFixed(3)}`],
-                  ["Raw DPV", breakdown.dpvRaw.toFixed(2)],
-                  ["HSM Confidence", breakdown.hsmConfidence],
+                  ["Production", bpsLabel(player.position, breakdown.bps)],
+                  ["Age Curve", ageModifierLabel(breakdown.ageModifier)],
+                  ["Opportunity", opportunityLabel(breakdown.opportunityScore)],
+                  ["Offensive Line", olineLabel(breakdown.olineModifier)],
+                  ["QB Situation", qbLabel(breakdown.qbQualityModifier)],
+                  ["Consistency", bbcsLabel(breakdown.bbcsModifier)],
+                  ["Positional Scarcity", scarcityLabel(breakdown.scarcityMultiplier)],
+                  ["Historical Comps", hsmLabel(breakdown.hsmConfidence)],
                 ].map(([label, value]) => (
                   <tr
                     key={label}
                     className="border-t border-zinc-100 dark:border-zinc-800 first:border-t-0"
                   >
                     <td className="px-4 py-2 text-zinc-500">{label}</td>
-                    <td className="px-4 py-2 text-right tabular-nums font-medium">
+                    <td className="px-4 py-2 text-right font-medium">
                       {value}
                     </td>
                   </tr>
