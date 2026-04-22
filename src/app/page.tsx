@@ -31,22 +31,37 @@ export default async function RankingsPage({
   const q = (sp.q ?? "").trim();
 
   const sb = createServerClient();
-  const { data: snapshots, error } = await sb
-    .from("dpv_snapshots")
-    .select(
-      "dpv, tier, player_id, players(name, position, current_team, birthdate)",
-    )
-    .eq("scoring_format", fmt)
-    .order("dpv", { ascending: false })
-    .limit(300);
+  const [snapshotsRes, marketRes] = await Promise.all([
+    sb
+      .from("dpv_snapshots")
+      .select(
+        "dpv, tier, player_id, players(name, position, current_team, birthdate)",
+      )
+      .eq("scoring_format", fmt)
+      .order("dpv", { ascending: false })
+      .limit(300),
+    sb
+      .from("market_values")
+      .select("player_id, market_value_normalized")
+      .eq("scoring_format", fmt)
+      .eq("source", "fantasycalc"),
+  ]);
 
-  if (error) {
+  if (snapshotsRes.error) {
     return (
       <div className="rounded-md border border-red-300 bg-red-50 p-4 text-red-900 dark:bg-red-950/40 dark:text-red-200">
         <p className="font-medium">Could not load rankings</p>
-        <pre className="text-xs mt-2 opacity-80">{error.message}</pre>
+        <pre className="text-xs mt-2 opacity-80">{snapshotsRes.error.message}</pre>
       </div>
     );
+  }
+
+  const snapshots = snapshotsRes.data;
+  const marketByPlayer = new Map<string, number>();
+  for (const m of marketRes.data ?? []) {
+    if (m.market_value_normalized !== null) {
+      marketByPlayer.set(m.player_id, Number(m.market_value_normalized));
+    }
   }
 
   type Row = {
@@ -161,41 +176,76 @@ export default async function RankingsPage({
                 <th className="px-4 py-2 text-left w-20">Team</th>
                 <th className="px-4 py-2 text-right w-16">Age</th>
                 <th className="px-4 py-2 text-right w-24">DPV</th>
+                <th className="px-4 py-2 text-right w-24">Market</th>
+                <th className="px-4 py-2 text-right w-20">Δ</th>
                 <th className="px-4 py-2 text-left w-36">Tier</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r, i) => (
-                <tr
-                  key={r.player_id}
-                  className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                >
-                  <td className="px-4 py-2 text-zinc-400 tabular-nums">{i + 1}</td>
-                  <td className="px-4 py-2 font-medium">
-                    <Link
-                      href={`/player/${r.player_id}?fmt=${fmt}`}
-                      className="hover:underline"
+              {filtered.map((r, i) => {
+                const market = marketByPlayer.get(r.player_id);
+                const delta = market !== undefined ? r.dpv - Math.round(market) : null;
+                return (
+                  <tr
+                    key={r.player_id}
+                    className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                  >
+                    <td className="px-4 py-2 text-zinc-400 tabular-nums">{i + 1}</td>
+                    <td className="px-4 py-2 font-medium">
+                      <Link
+                        href={`/player/${r.player_id}?fmt=${fmt}`}
+                        className="hover:underline"
+                      >
+                        {r.players!.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className="inline-block rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
+                        {r.players!.position}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-zinc-500">
+                      {r.players!.current_team ?? "—"}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {ageFrom(r.players!.birthdate)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums font-semibold">
+                      {r.dpv}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-zinc-500">
+                      {market !== undefined ? Math.round(market) : "—"}
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right tabular-nums ${
+                        delta === null
+                          ? "text-zinc-400"
+                          : delta > 0
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : delta < 0
+                          ? "text-rose-600 dark:text-rose-400"
+                          : "text-zinc-500"
+                      }`}
+                      title={
+                        delta === null
+                          ? "No market data"
+                          : delta > 0
+                          ? "DPV sees more value than market (potential buy)"
+                          : delta < 0
+                          ? "Market values higher than DPV (potential sell)"
+                          : "In line with market"
+                      }
                     >
-                      {r.players!.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">
-                    <span className="inline-block rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
-                      {r.players!.position}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-zinc-500">
-                    {r.players!.current_team ?? "—"}
-                  </td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    {ageFrom(r.players!.birthdate)}
-                  </td>
-                  <td className="px-4 py-2 text-right tabular-nums font-semibold">
-                    {r.dpv}
-                  </td>
-                  <td className="px-4 py-2 text-zinc-500">{r.tier}</td>
-                </tr>
-              ))}
+                      {delta === null
+                        ? "—"
+                        : delta > 0
+                        ? `+${delta}`
+                        : `${delta}`}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-500">{r.tier}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

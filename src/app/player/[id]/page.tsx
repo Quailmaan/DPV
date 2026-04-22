@@ -35,7 +35,7 @@ export default async function PlayerPage({
 
   const sb = createServerClient();
 
-  const [playerRes, seasonsRes, snapshotRes] = await Promise.all([
+  const [playerRes, seasonsRes, snapshotRes, marketRes] = await Promise.all([
     sb.from("players").select("*").eq("player_id", id).maybeSingle(),
     sb
       .from("player_seasons")
@@ -48,6 +48,13 @@ export default async function PlayerPage({
       .eq("player_id", id)
       .eq("scoring_format", fmt)
       .maybeSingle(),
+    sb
+      .from("market_values")
+      .select("market_value_normalized, position_rank, overall_rank")
+      .eq("player_id", id)
+      .eq("scoring_format", fmt)
+      .eq("source", "fantasycalc")
+      .maybeSingle(),
   ]);
 
   if (playerRes.error || !playerRes.data) return notFound();
@@ -55,8 +62,17 @@ export default async function PlayerPage({
   const player = playerRes.data;
   const seasons = seasonsRes.data ?? [];
   const snapshot = snapshotRes.data;
+  const market = marketRes.data;
   const breakdown = snapshot?.breakdown as DPVBreakdown | undefined;
   const age = ageFromBirth(player.birthdate);
+  const marketValue =
+    market?.market_value_normalized !== null && market?.market_value_normalized !== undefined
+      ? Math.round(Number(market.market_value_normalized))
+      : null;
+  const marketDelta =
+    marketValue !== null && snapshot?.dpv !== undefined && snapshot?.dpv !== null
+      ? snapshot.dpv - marketValue
+      : null;
 
   return (
     <div>
@@ -99,7 +115,7 @@ export default async function PlayerPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
           <div className="text-xs uppercase tracking-wider text-zinc-500">
             DPV
@@ -109,6 +125,29 @@ export default async function PlayerPage({
           </div>
           <div className="text-sm text-zinc-500 mt-1">
             {snapshot?.tier ?? "No snapshot"}
+          </div>
+        </div>
+        <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+          <div className="text-xs uppercase tracking-wider text-zinc-500">
+            Market (FantasyCalc)
+          </div>
+          <div className="text-4xl font-bold tabular-nums mt-1">
+            {marketValue ?? "—"}
+          </div>
+          <div className="text-sm mt-1">
+            {marketDelta === null ? (
+              <span className="text-zinc-500">No market data</span>
+            ) : marketDelta > 0 ? (
+              <span className="text-emerald-600 dark:text-emerald-400">
+                +{marketDelta} vs market (buy)
+              </span>
+            ) : marketDelta < 0 ? (
+              <span className="text-rose-600 dark:text-rose-400">
+                {marketDelta} vs market (sell)
+              </span>
+            ) : (
+              <span className="text-zinc-500">In line with market</span>
+            )}
           </div>
         </div>
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">

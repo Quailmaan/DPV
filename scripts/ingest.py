@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
@@ -92,7 +93,7 @@ def half_ppr_points(row) -> float:
     )
 
 
-def ingest_rosters(seasons: list[int]) -> dict[str, str]:
+def ingest_rosters(seasons: list[int]) -> tuple[dict[str, str], dict[str, str]]:
     print("Loading rosters...")
     dfs = []
     for y in seasons:
@@ -121,6 +122,15 @@ def ingest_rosters(seasons: list[int]) -> dict[str, str]:
                 pfr_to_gsis[str(pfr)] = str(gsis)
         print(f"  crosswalk: {len(pfr_to_gsis)} pfr_id -> gsis_id mappings")
 
+    sleeper_to_gsis: dict[str, str] = {}
+    if "sleeper_id" in rosters.columns:
+        for _, r in rosters.iterrows():
+            sleeper = r.get("sleeper_id")
+            gsis = r.get(id_col)
+            if pd.notna(sleeper) and pd.notna(gsis):
+                sleeper_to_gsis[str(sleeper)] = str(gsis)
+        print(f"  crosswalk: {len(sleeper_to_gsis)} sleeper_id -> gsis_id mappings")
+
     latest = rosters.sort_values("_season").groupby(id_col).tail(1)
     players = []
     for _, r in latest.iterrows():
@@ -142,7 +152,7 @@ def ingest_rosters(seasons: list[int]) -> dict[str, str]:
         )
     print(f"  {len(players)} unique players")
     batched_upsert("players", players, on_conflict="player_id")
-    return pfr_to_gsis
+    return pfr_to_gsis, sleeper_to_gsis
 
 
 def ingest_seasons(seasons: list[int], pfr_to_gsis: dict[str, str] | None = None) -> None:
@@ -396,14 +406,84 @@ def ingest_team_context(seasons: list[int]) -> None:
     batched_upsert("team_seasons", rows, on_conflict="team,season")
 
 
+FC_BASE = "https://api.fantasycalc.com/values/current"
+FC_FORMATS = {
+    "STANDARD": {"isDynasty": "true", "numQbs": "1", "ppr": "0"},
+    "HALF_PPR": {"isDynasty": "true", "numQbs": "1", "ppr": "0.5"},
+    "FULL_PPR": {"isDynasty": "true", "numQbs": "1", "ppr": "1"},
+}
+
+
+def fetch_fantasycalc(params: dict[str, str]) -> list[dict]:
+    r = requests.get(FC_BASE, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def ingest_market_values(sleeper_to_gsis: dict[str, str]) -> None:
+    print("Loading FantasyCalc dynasty values...")
+    existing = fetch_all_rows("players", "player_id,name,position")
+    name_pos_to_id = {
+        (p["name"].lower(), p.get("position") or ""): p["player_id"] for p in existing
+    }
+
+    rows = []
+    for fmt, params in FC_FORMATS.items():
+        try:
+            data = fetch_fantasycalc(params)
+        except Exception as e:
+            print(f"  {fmt}: FAILED ({e})")
+            continue
+        print(f"  {fmt}: {len(data)} players from FantasyCalc")
+
+        matched_sleeper = 0
+        matched_name = 0
+        unmatched = 0
+        for entry in data:
+            p = entry.get("player") or {}
+            position = p.get("position")
+            if position not in POSITIONS:
+                continue
+            sleeper = p.get("sleeperId")
+            pid = sleeper_to_gsis.get(str(sleeper)) if sleeper else None
+            if pid:
+                matched_sleeper += 1
+            else:
+                name = p.get("name")
+                if isinstance(name, str):
+                    pid = name_pos_to_id.get((name.lower(), position))
+                    if pid:
+                        matched_name += 1
+            if not pid:
+                unmatched += 1
+                continue
+            value = entry.get("value")
+            rows.append(
+                {
+                    "player_id": pid,
+                    "scoring_format": fmt,
+                    "market_value_normalized": float(value) if value is not None else None,
+                    "position_rank": entry.get("positionRank"),
+                    "overall_rank": entry.get("overallRank"),
+                    "source": "fantasycalc",
+                }
+            )
+        print(
+            f"    matched sleeper:{matched_sleeper} name:{matched_name} unmatched:{unmatched}"
+        )
+
+    batched_upsert("market_values", rows, on_conflict="player_id,scoring_format,source")
+
+
 def main() -> None:
     if SUPABASE_SECRET_KEY in ("", "PASTE_YOUR_SECRET_KEY_HERE"):
         print("ERROR: SUPABASE_SECRET_KEY not set in .env.local")
         sys.exit(1)
-    pfr_to_gsis = ingest_rosters(SEASONS)
+    pfr_to_gsis, sleeper_to_gsis = ingest_rosters(SEASONS)
     ingest_seasons(SEASONS)
     ingest_snaps(SEASONS, pfr_to_gsis)
     ingest_team_context(SEASONS)
+    ingest_market_values(sleeper_to_gsis)
     print("Done.")
 
 
