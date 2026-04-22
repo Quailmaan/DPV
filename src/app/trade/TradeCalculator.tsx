@@ -71,8 +71,11 @@ function verdictFor(
   const g = sideValue(giving);
   const r = sideValue(getting);
 
-  const denom = Math.max(g.var_, r.var_, 1);
-  const pct = (r.var_ - g.var_) / denom;
+  // Base the verdict on raw DPV — it already includes positional scarcity
+  // via the scarcity tier modifier. Layering a hard VAR floor on top
+  // double-penalized mid-tier players whose DPV sat below replacement.
+  const denom = Math.max(g.dpv, r.dpv, 1);
+  const pct = (r.dpv - g.dpv) / denom;
 
   const ageDelta =
     g.avgAge !== null && r.avgAge !== null ? r.avgAge - g.avgAge : 0;
@@ -88,7 +91,7 @@ function verdictFor(
       label: "Subway King Trade",
       flavor:
         "\"Dang ol' footlong, man, I tell you what.\" You're walking out with way more than you gave up.",
-      explanation: `You gain ${Math.round(pct * 100)}% more value-above-replacement than you give up. Accept before they notice.${ageNote}`,
+      explanation: `You gain ${Math.round(pct * 100)}% more DPV than you give up. Accept before they notice.${ageNote}`,
       tone: "win_big",
     };
   }
@@ -96,7 +99,7 @@ function verdictFor(
     return {
       label: "Solid Win",
       flavor: "Clear lean in your favor.",
-      explanation: `You come out ${Math.round(pct * 100)}% ahead on value-above-replacement.${ageNote}`,
+      explanation: `You come out ${Math.round(pct * 100)}% ahead on total DPV.${ageNote}`,
       tone: "win",
     };
   }
