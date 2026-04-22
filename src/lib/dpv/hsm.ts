@@ -7,11 +7,27 @@ export interface HSMResult {
   analogs: Array<{ name: string; similarity: number; season: number }>;
 }
 
-export function runHSM(_input: DPVInput): HSMResult {
+export function runHSM(input: DPVInput): HSMResult {
+  const pre = input.precomputedHSM;
+  if (!pre || pre.n === 0 || pre.meanNextPPG === null) {
+    return {
+      projectedPPG: null,
+      confidence: "NONE",
+      blendWeight: 1.0,
+      analogs: [],
+    };
+  }
+  const confidence: HSMResult["confidence"] =
+    pre.n >= 6 ? "HIGH" : pre.n >= 4 ? "MEDIUM" : "LOW";
+  // Use median (more robust to outlier comps) blended slightly toward mean.
+  const projectedPPG =
+    pre.medianNextPPG !== null
+      ? 0.6 * pre.medianNextPPG + 0.4 * pre.meanNextPPG
+      : pre.meanNextPPG;
   return {
-    projectedPPG: null,
-    confidence: "NONE",
-    blendWeight: 1.0,
+    projectedPPG,
+    confidence,
+    blendWeight: hsmBlendWeight(confidence),
     analogs: [],
   };
 }

@@ -123,6 +123,19 @@ async function main() {
   const teamIdx = new Map<string, (typeof teams)[number]>();
   for (const t of teams) teamIdx.set(`${t.team}|${t.season}`, t);
 
+  console.log("Loading hsm_comps...");
+  const hsmRows = await fetchAll<{
+    player_id: string;
+    summary: {
+      n: number;
+      meanNextPPG: number | null;
+      medianNextPPG: number | null;
+    };
+  }>("hsm_comps");
+  const hsmByPlayer = new Map<string, (typeof hsmRows)[number]["summary"]>();
+  for (const h of hsmRows) hsmByPlayer.set(h.player_id, h.summary);
+  console.log(`  ${hsmRows.length} hsm summaries`);
+
   const byPlayer = new Map<string, typeof seasons>();
   for (const s of seasons) {
     const arr = byPlayer.get(s.player_id) ?? [];
@@ -181,6 +194,7 @@ async function main() {
     const olineRank = teamCtx?.oline_composite_rank ?? 16;
 
     const seasonStats = rawSeasons.slice(0, 3).map(toSeasonStats);
+    const hsmSummary = hsmByPlayer.get(p.player_id);
 
     for (const fmt of FORMATS) {
       const input: DPVInput = {
@@ -205,6 +219,13 @@ async function main() {
           qbTransition: "STABLE",
         },
         scoringFormat: fmt,
+        precomputedHSM: hsmSummary
+          ? {
+              meanNextPPG: hsmSummary.meanNextPPG,
+              medianNextPPG: hsmSummary.medianNextPPG,
+              n: hsmSummary.n,
+            }
+          : undefined,
       };
 
       const r = calculateDPV(input);

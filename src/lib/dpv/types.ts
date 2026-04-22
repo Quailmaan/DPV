@@ -53,6 +53,12 @@ export interface PlayerProfile {
   teamOffenseRank?: number;
 }
 
+export interface PrecomputedHSM {
+  meanNextPPG: number | null;
+  medianNextPPG: number | null;
+  n: number;
+}
+
 export interface DPVInput {
   profile: PlayerProfile;
   seasons: SeasonStats[];
@@ -61,6 +67,7 @@ export interface DPVInput {
   scoringFormat: ScoringFormat;
   marketValueNormalized?: number;
   positionRank?: number;
+  precomputedHSM?: PrecomputedHSM;
 }
 
 export interface DPVBreakdown {
