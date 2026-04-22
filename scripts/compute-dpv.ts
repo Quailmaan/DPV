@@ -187,8 +187,13 @@ async function main() {
       skipped++;
       continue;
     }
-    const teamCtx = mostRecent.team
-      ? teamIdx.get(`${mostRecent.team}|${mostRecent.season}`)
+    // Situation context reflects the team they'll play for NEXT — use
+    // players.current_team against the most recent team_seasons row for
+    // that team. Falls back to mostRecent.team if current_team isn't set.
+    const situationTeam = p.current_team ?? mostRecent.team;
+    const teamCtx = situationTeam
+      ? teamIdx.get(`${situationTeam}|${CURRENT_SEASON}`) ??
+        teamIdx.get(`${situationTeam}|${mostRecent.season}`)
       : null;
     const qbTier = (teamCtx?.qb_tier ?? 3) as QBTier;
     const olineRank = teamCtx?.oline_composite_rank ?? 16;
