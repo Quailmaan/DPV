@@ -95,11 +95,24 @@ export default async function TradePage({
       };
     });
 
+  // Pull per-year class strength multipliers (Phase 3). Missing rows default
+  // to 1.0 inside pickDpv so picks still render even before prospects exist.
+  const { data: classRows } = await sb
+    .from("class_strength")
+    .select("draft_year, multiplier");
+  const classOverrides: Record<number, number> = {};
+  for (const row of classRows ?? []) {
+    classOverrides[(row as { draft_year: number }).draft_year] = Number(
+      (row as { multiplier: number }).multiplier,
+    );
+  }
+
   // Merge rookie picks into the tradeable pool. They're ranked alongside NFL
   // players by DPV so the search dropdown blends them naturally.
-  const players: TradePlayer[] = [...nflPlayers, ...generatePickPlayers()].sort(
-    (a, b) => b.dpv - a.dpv,
-  );
+  const players: TradePlayer[] = [
+    ...nflPlayers,
+    ...generatePickPlayers(new Date(), classOverrides),
+  ].sort((a, b) => b.dpv - a.dpv);
 
   const fromId = fromRosterId ? Number(fromRosterId) : null;
 

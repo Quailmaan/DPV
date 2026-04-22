@@ -92,11 +92,15 @@ export function currentPickWindow(now: Date = new Date()): [number, number, numb
 }
 
 // Compute the raw DPV for a given pick in a given year.
+// `classOverrides` lets callers inject dynamic per-year multipliers from the
+// Phase 3 class_strength table, falling back to the static CLASS_STRENGTH
+// map and finally to 1.0 (neutral class).
 export function pickDpv(
   year: number,
   round: 1 | 2 | 3,
   slot: number,
   windowBase: number,
+  classOverrides?: Record<number, number>,
 ): number {
   const key = `${round}.${String(slot).padStart(2, "0")}`;
   const curve = PICK_CURVE[key];
@@ -105,6 +109,7 @@ export function pickDpv(
   if (distance > 2) return 0;
   const distMult =
     YEAR_DISTANCE_MULTIPLIER[distance as 0 | 1 | 2] ?? 0;
-  const classMult = CLASS_STRENGTH[year] ?? 1.0;
+  const classMult =
+    classOverrides?.[year] ?? CLASS_STRENGTH[year] ?? 1.0;
   return Math.round(BASELINE_1_01_DPV * curve * distMult * classMult);
 }

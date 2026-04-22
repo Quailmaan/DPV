@@ -108,6 +108,36 @@ create table if not exists public.league_rosters (
 
 create index if not exists idx_league_rosters_league on public.league_rosters(league_id);
 
+-- Pre-NFL-draft prospect rankings. Used to compute class strength per
+-- draft_year, which in turn multiplies pick values. Populated by a
+-- consensus-ingestion script (manual seed for now; data-source integration
+-- is future work).
+create table if not exists public.prospects (
+  prospect_id text primary key,
+  draft_year int not null,
+  name text not null,
+  position text check (position in ('QB','RB','WR','TE')),
+  consensus_grade numeric,
+  projected_round int,
+  projected_overall_pick int,
+  source text,
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_prospects_year on public.prospects(draft_year);
+
+-- Cached per-year class strength aggregate. Derived from the prospects
+-- table but stored separately so the trade calc can read it cheaply without
+-- re-aggregating on every request.
+create table if not exists public.class_strength (
+  draft_year int primary key,
+  multiplier numeric not null default 1.0,
+  top10_avg_grade numeric,
+  top30_avg_grade numeric,
+  prospect_count int,
+  updated_at timestamptz default now()
+);
+
 -- ============================================================
 -- RLS
 -- ============================================================
@@ -119,6 +149,8 @@ alter table public.market_values enable row level security;
 alter table public.dpv_snapshots enable row level security;
 alter table public.leagues enable row level security;
 alter table public.league_rosters enable row level security;
+alter table public.prospects enable row level security;
+alter table public.class_strength enable row level security;
 
 drop policy if exists "public read players" on public.players;
 create policy "public read players" on public.players
@@ -146,4 +178,12 @@ create policy "public read leagues" on public.leagues
 
 drop policy if exists "public read league_rosters" on public.league_rosters;
 create policy "public read league_rosters" on public.league_rosters
+  for select to anon, authenticated using (true);
+
+drop policy if exists "public read prospects" on public.prospects;
+create policy "public read prospects" on public.prospects
+  for select to anon, authenticated using (true);
+
+drop policy if exists "public read class_strength" on public.class_strength;
+create policy "public read class_strength" on public.class_strength
   for select to anon, authenticated using (true);
