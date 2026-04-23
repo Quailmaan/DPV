@@ -22,10 +22,16 @@ function ageFromBirth(bd: string | null): number | null {
   );
 }
 
+// Per-position PPG bands. QBs score in a different universe (pass TDs + yards),
+// TEs peak lower than WRs, RB and WR split since PPR shifts WR PPG up.
 function bpsLabel(position: string, ppg: number): string {
-  const elite = position === "QB" ? 22 : 15;
-  const strong = position === "QB" ? 18 : 12;
-  const solid = position === "QB" ? 14 : 8;
+  const bands: Record<string, [number, number, number]> = {
+    QB: [22, 18, 14],
+    RB: [16, 13, 9],
+    WR: [14, 11, 7.5],
+    TE: [12, 9, 6],
+  };
+  const [elite, strong, solid] = bands[position] ?? bands.WR;
   if (ppg >= elite) return "Elite producer";
   if (ppg >= strong) return "Strong producer";
   if (ppg >= solid) return "Solid producer";
@@ -40,12 +46,30 @@ function ageModifierLabel(v: number): string {
   return "Late career";
 }
 
-function opportunityLabel(v: number): string {
-  if (v >= 0.7) return "Workhorse role";
-  if (v >= 0.5) return "High volume";
-  if (v >= 0.35) return "Moderate role";
+// Opportunity score is a 0-1 blend of snap + touch + vacancy. Numeric bands
+// stay constant but labels describe what that score means for the position —
+// a 0.7 opportunity score is a workhorse RB but an alpha WR.
+function opportunityLabel(position: string, v: number): string {
+  if (position === "RB") {
+    if (v >= 0.7) return "Workhorse role";
+    if (v >= 0.5) return "High volume";
+    if (v >= 0.35) return "Committee lead";
+    if (v >= 0.2) return "Rotational";
+    return "Limited touches";
+  }
+  if (position === "TE") {
+    if (v >= 0.7) return "Elite target";
+    if (v >= 0.5) return "Primary target";
+    if (v >= 0.35) return "Involved";
+    if (v >= 0.2) return "Secondary role";
+    return "Limited targets";
+  }
+  // WR (default)
+  if (v >= 0.7) return "Alpha target";
+  if (v >= 0.5) return "Primary target";
+  if (v >= 0.35) return "Secondary target";
   if (v >= 0.2) return "Rotational";
-  return "Limited touches";
+  return "Limited targets";
 }
 
 function olineLabel(v: number): string {
@@ -411,10 +435,22 @@ export default async function PlayerPage({
                     ["Age Curve", ageModifierLabel(breakdown.ageModifier)],
                     player.position !== "QB" && [
                       "Opportunity",
-                      opportunityLabel(breakdown.opportunityScore),
+                      opportunityLabel(
+                        player.position,
+                        breakdown.opportunityScore,
+                      ),
                     ],
-                    ["Offensive Line", olineLabel(breakdown.olineModifier)],
-                    player.position !== "QB" && [
+                    // OL only matters for RBs in the model — WR/TE/QB multipliers
+                    // barely move (TE is a literal 1.0 no-op). Hiding keeps the
+                    // table honest instead of reading "Average" on everyone.
+                    player.position === "RB" && [
+                      "Offensive Line",
+                      olineLabel(breakdown.olineModifier),
+                    ],
+                    // QB play drives WR/TE outcomes; RB multiplier range is
+                    // 0.98-1.02 so the row is pure noise. QB position never
+                    // shows (already skipped by the non-QB check below).
+                    (player.position === "WR" || player.position === "TE") && [
                       "QB Situation",
                       qbLabel(breakdown.qbQualityModifier),
                     ],
