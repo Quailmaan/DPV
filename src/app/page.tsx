@@ -27,7 +27,7 @@ export default async function RankingsPage({
 }) {
   const sp = await searchParams;
   const fmt: ScoringFormat = isScoringFormat(sp.fmt) ? sp.fmt : "HALF_PPR";
-  const pos = (sp.pos ?? "ALL").toUpperCase();
+  const pos = (sp.pos || "ALL").toUpperCase();
   const q = (sp.q ?? "").trim();
 
   const sb = createServerClient();
