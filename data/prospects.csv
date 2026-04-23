@@ -1,0 +1,63 @@
+prospect_id,source,draft_year,name,position,consensus_grade,projected_round,projected_overall_pick
+# 2026 class — DRAFTTEK top 100 (filtered to offensive skill positions)
+mendoza-fernando-2026,DRAFTTEK,2026,Fernando Mendoza,QB,100,1,1
+love-jeremiyah-2026,DRAFTTEK,2026,Jeremiyah Love,RB,98,1,3
+tate-carnell-2026,DRAFTTEK,2026,Carnell Tate,WR,92,1,9
+tyson-jordyn-2026,DRAFTTEK,2026,Jordyn Tyson,WR,91,1,10
+lemon-makai-2026,DRAFTTEK,2026,Makai Lemon,WR,89,1,12
+sadiq-kenyon-2026,DRAFTTEK,2026,Kenyon Sadiq,TE,86,1,15
+cooper-omar-2026,DRAFTTEK,2026,Omar Cooper Jr.,WR,81,1,20
+simpson-ty-2026,DRAFTTEK,2026,Ty Simpson,QB,75,1,26
+concepcion-kc-2026,DRAFTTEK,2026,KC Concepcion,WR,74,1,27
+boston-denzel-2026,DRAFTTEK,2026,Denzel Boston,WR,71,1,30
+brazzell-chris-2026,DRAFTTEK,2026,Chris Brazzell II,WR,52,2,49
+price-jadarian-2026,DRAFTTEK,2026,Jadarian Price,RB,50,2,51
+stowers-eli-2026,DRAFTTEK,2026,Eli Stowers,TE,46,2,55
+klare-max-2026,DRAFTTEK,2026,Max Klare,TE,43,2,58
+bell-chris-2026,DRAFTTEK,2026,Chris Bell,WR,42,2,59
+bernard-germie-2026,DRAFTTEK,2026,Germie Bernard,WR,41,2,60
+hurst-ted-2026,DRAFTTEK,2026,Ted Hurst,WR,36,3,65
+sarratt-elijah-2026,DRAFTTEK,2026,Elijah Sarratt,WR,34,3,67
+williams-antonio-2026,DRAFTTEK,2026,Antonio Williams,WR,33,3,68
+fields-malachi-2026,DRAFTTEK,2026,Malachi Fields,WR,29,3,72
+washington-mike-2026,DRAFTTEK,2026,Mike Washington Jr.,RB,27,3,74
+stribling-dezhaun-2026,DRAFTTEK,2026,De'Zhaun Stribling,WR,20,3,81
+allar-drew-2026,DRAFTTEK,2026,Drew Allar,QB,14,3,87
+lance-bryce-2026,DRAFTTEK,2026,Bryce Lance,WR,12,3,89
+delp-oscar-2026,DRAFTTEK,2026,Oscar Delp,TE,11,3,90
+burks-deion-2026,DRAFTTEK,2026,Deion Burks,WR,6,3,95
+joly-justin-2026,DRAFTTEK,2026,Justin Joly,TE,5,3,96
+bell-skyler-2026,DRAFTTEK,2026,Skyler Bell,WR,3,4,98
+# 2026 class — WalterFootball (Charlie Campbell) mock draft R1
+mendoza-fernando-2026,WALTERFOOTBALL_CAMPBELL,2026,Fernando Mendoza,QB,100,1,1
+love-jeremiyah-2026,WALTERFOOTBALL_CAMPBELL,2026,Jeremiyah Love,RB,98,1,3
+tyson-jordyn-2026,WALTERFOOTBALL_CAMPBELL,2026,Jordyn Tyson,WR,96,1,5
+lemon-makai-2026,WALTERFOOTBALL_CAMPBELL,2026,Makai Lemon,WR,88,1,13
+tate-carnell-2026,WALTERFOOTBALL_CAMPBELL,2026,Carnell Tate,WR,85,1,16
+# 2027 class — NBADraftRoom R1 mock (offensive skill positions filtered)
+manning-arch-2027,NBADRAFTROOM_MOCK,2027,Arch Manning,QB,100,1,1
+moore-dante-2027,NBADRAFTROOM_MOCK,2027,Dante Moore,QB,99,1,2
+smith-jeremiah-2027,NBADRAFTROOM_MOCK,2027,Jeremiah Smith,WR,98,1,3
+raiola-dylan-2027,NBADRAFTROOM_MOCK,2027,Dylan Raiola,QB,97,1,4
+sayin-julian-2027,NBADRAFTROOM_MOCK,2027,Julian Sayin,QB,93,1,8
+coleman-cam-2027,NBADRAFTROOM_MOCK,2027,Cam Coleman,WR,92,1,9
+williams-ryan-2027,NBADRAFTROOM_MOCK,2027,Ryan Williams,WR,91,1,10
+lagway-dj-2027,NBADRAFTROOM_MOCK,2027,DJ Lagway,QB,90,1,11
+wingo-ryan-2027,NBADRAFTROOM_MOCK,2027,Ryan Wingo,WR,89,1,12
+wesco-bryant-2027,NBADRAFTROOM_MOCK,2027,Bryant Wesco,WR,84,1,17
+iamaleava-nico-2027,NBADRAFTROOM_MOCK,2027,Nico Iamaleava,QB,83,1,18
+brown-isaac-2027,NBADRAFTROOM_MOCK,2027,Isaac Brown,RB,81,1,20
+leavitt-sam-2027,NBADRAFTROOM_MOCK,2027,Sam Leavitt,QB,80,1,21
+holstein-eli-2027,NBADRAFTROOM_MOCK,2027,Eli Holstein,QB,79,1,22
+marsh-nick-2027,NBADRAFTROOM_MOCK,2027,Nick Marsh,WR,76,1,25
+moore-tj-2027,NBADRAFTROOM_MOCK,2027,T.J. Moore,WR,73,1,28
+# 2027 class — WalterFootball (Charlie Campbell) early mock top 16
+manning-arch-2027,WALTERFOOTBALL_CAMPBELL,2027,Arch Manning,QB,100,1,1
+smith-jeremiah-2027,WALTERFOOTBALL_CAMPBELL,2027,Jeremiah Smith,WR,99,1,2
+moore-dante-2027,WALTERFOOTBALL_CAMPBELL,2027,Dante Moore,QB,96,1,5
+coleman-cam-2027,WALTERFOOTBALL_CAMPBELL,2027,Cam Coleman,WR,90,1,11
+sellers-lanorris-2027,WALTERFOOTBALL_CAMPBELL,2027,LaNorris Sellers,QB,89,1,12
+iamaleava-nico-2027,WALTERFOOTBALL_CAMPBELL,2027,Nico Iamaleava,QB,88,1,13
+marsh-nick-2027,WALTERFOOTBALL_CAMPBELL,2027,Nick Marsh,WR,87,1,14
+baugh-jadan-2027,WALTERFOOTBALL_CAMPBELL,2027,Jadan Baugh,RB,86,1,15
+becker-charlie-2027,WALTERFOOTBALL_CAMPBELL,2027,Charlie Becker,WR,85,1,16
