@@ -77,6 +77,13 @@ def fetch_snaps(year: int) -> pd.DataFrame:
     return pd.read_parquet(url)
 
 
+def fetch_pfr_rush_advstats() -> pd.DataFrame:
+    """PFR advanced rushing stats — YBC, YAC, broken tackles. All seasons
+    in one file; coverage starts 2018."""
+    url = f"{NFLVERSE}/pfr_advstats/advstats_season_rush.parquet"
+    return pd.read_parquet(url)
+
+
 def half_ppr_points(row) -> float:
     return (
         0.04 * (row.get("passing_yards") or 0)
@@ -400,6 +407,10 @@ def ingest_team_context(seasons: list[int]) -> None:
             return 4
         return 5
 
+    # Baseline OL rank: team YPC from weekly data (covers all seasons).
+    # YPC confounds RB talent with OL quality — a great RB can mask a weak
+    # front. We keep this as the fallback for pre-2018 and teams missing
+    # from PFR's dataset.
     rbs = weekly[weekly["position"] == "RB"].copy()
     rbs["carries"] = pd.to_numeric(rbs.get("carries"), errors="coerce").fillna(0)
     rbs["rushing_yards"] = pd.to_numeric(rbs.get("rushing_yards"), errors="coerce").fillna(0)
@@ -410,12 +421,47 @@ def ingest_team_context(seasons: list[int]) -> None:
     )
     rb_team = rb_team[rb_team["team_carries"] >= 50].copy()
     rb_team["ypc"] = rb_team["team_rush_yd"] / rb_team["team_carries"]
-    rb_team["oline_rank"] = (
+    rb_team["oline_rank_ypc"] = (
         rb_team.groupby("season")["ypc"].rank(ascending=False, method="min").astype(int)
     )
-    oline_idx: dict[tuple[str, int], int] = {}
+    ypc_idx: dict[tuple[str, int], int] = {}
     for _, r in rb_team.iterrows():
-        oline_idx[(r[team_col], int(r["season"]))] = int(r["oline_rank"])
+        ypc_idx[(r[team_col], int(r["season"]))] = int(r["oline_rank_ypc"])
+
+    # Preferred OL signal: team yards-before-contact per attempt from PFR
+    # advanced stats. YBC strips out post-contact yardage — what the RB
+    # does AFTER the OL's job — so it's a cleaner front-five metric.
+    # Coverage: 2018+, RBs only, team min 100 attempts.
+    ybc_idx: dict[tuple[str, int], int] = {}
+    try:
+        pfr = fetch_pfr_rush_advstats()
+        pfr = pfr[pfr["pos"] == "RB"].copy()
+        # PFR emits synthetic "2TM"/"3TM" rows that sum stats across a
+        # mid-season trade — these would double-count against the team
+        # rows, so drop anything that isn't a real franchise code.
+        pfr = pfr[~pfr["tm"].str.contains("TM", na=False)].copy()
+        pfr["ybc"] = pd.to_numeric(pfr["ybc"], errors="coerce").fillna(0)
+        pfr["att"] = pd.to_numeric(pfr["att"], errors="coerce").fillna(0)
+        pfr_team = (
+            pfr.groupby(["season", "tm"])
+            .agg(team_ybc=("ybc", "sum"), team_att=("att", "sum"))
+            .reset_index()
+        )
+        pfr_team = pfr_team[pfr_team["team_att"] >= 100].copy()
+        pfr_team["ybc_per_att"] = pfr_team["team_ybc"] / pfr_team["team_att"]
+        pfr_team["oline_rank_ybc"] = (
+            pfr_team.groupby("season")["ybc_per_att"]
+            .rank(ascending=False, method="min")
+            .astype(int)
+        )
+        for _, r in pfr_team.iterrows():
+            ybc_idx[(str(r["tm"]), int(r["season"]))] = int(r["oline_rank_ybc"])
+        print(f"  YBC ranks computed for {len(ybc_idx)} team-seasons (2018+)")
+    except Exception as e:
+        print(f"  WARN: PFR advstats fetch failed ({e}) — falling back to YPC")
+
+    def oline_rank_for(team: str, season: int) -> int | None:
+        return ybc_idx.get((team, season)) or ypc_idx.get((team, season))
 
     rows = []
     for _, r in team_qb.iterrows():
@@ -428,11 +474,18 @@ def ingest_team_context(seasons: list[int]) -> None:
                 "team": team,
                 "season": season,
                 "qb_tier": qb_tier(float(r["ppg"])),
-                "oline_composite_rank": oline_idx.get((team, season)),
+                "oline_composite_rank": oline_rank_for(team, season),
                 "team_offense_rank": None,
             }
         )
-    print(f"  {len(rows)} team-season rows (oline ranks: {sum(1 for r in rows if r['oline_composite_rank'] is not None)})")
+    ybc_count = sum(
+        1 for r in rows if (r["team"], r["season"]) in ybc_idx
+    )
+    print(
+        f"  {len(rows)} team-season rows "
+        f"(oline ranks: {sum(1 for r in rows if r['oline_composite_rank'] is not None)} "
+        f"— {ybc_count} via YBC, rest via YPC)"
+    )
     batched_upsert("team_seasons", rows, on_conflict="team,season")
 
 

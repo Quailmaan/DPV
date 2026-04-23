@@ -50,10 +50,12 @@ DPV_normalized = round(DPV_final × 380)  // scaled to 0-10000`}
           <ul className="list-disc pl-6 space-y-1">
             <li>
               <b>O-Line Quality:</b> team rank (1-32 per season) derived from
-              RB yards-per-carry (min 50 carries to qualify). Strong effect on
-              RBs, weak on QBs/WRs. Note: YPC confounds RB talent and OL
-              quality; a future pass will add yards-before-contact from Next
-              Gen Stats.
+              yards-before-contact per rush attempt, pulled from PFR advanced
+              stats via nflverse. YBC strips out what the RB does AFTER the
+              OL&apos;s job, so it isolates the front-five signal far better
+              than raw YPC. Coverage: 2018+, min 100 team attempts; earlier
+              seasons fall back to YPC. Strong effect on RBs; we hide the
+              row for WR/TE/QB since the multiplier barely moves them.
             </li>
             <li>
               <b>QB Quality:</b> 5 tiers by starter fantasy PPG. Strong effect
@@ -200,10 +202,8 @@ year_distance: { current: 1.0, +1 year: 0.75, +2 years: 0.55 }`}
         <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
           <h2 className="font-semibold text-base">Planned (v2)</h2>
           <ul className="list-disc pl-6 space-y-1">
-            <li>Historical Situation Matching (HSM) — cosine similarity comps</li>
             <li>Multi-year projections with age-adjusted composite</li>
             <li>Percentile-based market delta (normalized across scale gap)</li>
-            <li>Yards-before-contact (NGS) as truer OL signal</li>
             <li>
               More prospect sources (NFL.com, ESPN, PFF) to reduce consensus
               noise on 2027/2028 classes
