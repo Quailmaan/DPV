@@ -95,16 +95,26 @@ export default async function TradePage({
       };
     });
 
-  // Pull per-year class strength multipliers (Phase 3). Missing rows default
-  // to 1.0 inside pickDpv so picks still render even before prospects exist.
+  // Pull per-year class depth signal (Phase 3). pickDpv uses these counts
+  // to shape the pick curve slot-by-slot; years with no row default to
+  // neutral so picks still render before prospect data exists.
   const { data: classRows } = await sb
     .from("class_strength")
-    .select("draft_year, multiplier");
-  const classOverrides: Record<number, number> = {};
+    .select("draft_year, r1_offensive_count, top15_offensive_count");
+  const classOverrides: Record<
+    number,
+    { r1_offensive_count: number | null; top15_offensive_count: number | null }
+  > = {};
   for (const row of classRows ?? []) {
-    classOverrides[(row as { draft_year: number }).draft_year] = Number(
-      (row as { multiplier: number }).multiplier,
-    );
+    const r = row as {
+      draft_year: number;
+      r1_offensive_count: number | null;
+      top15_offensive_count: number | null;
+    };
+    classOverrides[r.draft_year] = {
+      r1_offensive_count: r.r1_offensive_count,
+      top15_offensive_count: r.top15_offensive_count,
+    };
   }
 
   // Merge rookie picks into the tradeable pool. They're ranked alongside NFL

@@ -155,14 +155,27 @@ create index if not exists idx_prospect_consensus_year on public.prospect_consen
 -- Cached per-year class strength aggregate. Derived from the prospects
 -- table but stored separately so the trade calc can read it cheaply without
 -- re-aggregating on every request.
+--
+-- The slot-aware pick calculator (src/lib/picks/constants.ts) drives off
+-- r1_offensive_count and top15_offensive_count — cross-year anchors that
+-- capture "how many real NFL first-round offensive prospects exist."
+-- multiplier/top10_avg_grade remain for legacy readers / dashboards.
 create table if not exists public.class_strength (
   draft_year int primary key,
   multiplier numeric not null default 1.0,
+  r1_offensive_count int,
+  top15_offensive_count int,
   top10_avg_grade numeric,
   top30_avg_grade numeric,
   prospect_count int,
   updated_at timestamptz default now()
 );
+
+-- Migration for installs that predate the count columns.
+alter table public.class_strength
+  add column if not exists r1_offensive_count int;
+alter table public.class_strength
+  add column if not exists top15_offensive_count int;
 
 -- ============================================================
 -- RLS

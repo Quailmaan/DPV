@@ -12,9 +12,13 @@ import { createClient } from "@supabase/supabase-js";
 // and map the average rank back to a 0-100 normalized grade via exponential
 // decay (rank 1 → 100, rank 10 → ~64, rank 50 → ~8).
 //
+// Projected NFL pick / round is averaged separately across sources that
+// provided one. This feeds compute-class-strength.ts, which counts how many
+// offensive prospects per year project inside Round 1 / top 15 — the
+// cross-year anchor the slot-aware pick curve runs on.
+//
 // A prospect only ranked by one source is still included, with source_count
-// = 1 so downstream consumers (class_strength) can weight or filter by
-// agreement.
+// = 1 so downstream consumers can weight or filter by agreement.
 
 type Row = {
   prospect_id: string;
@@ -36,6 +40,11 @@ function rankToGrade(avgRank: number): number {
   return Number((100 * Math.exp(-(avgRank - 1) / 22)).toFixed(2));
 }
 
+function mean(xs: number[]): number | null {
+  if (xs.length === 0) return null;
+  return xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
 async function main() {
   const sb = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -51,9 +60,6 @@ async function main() {
     return;
   }
 
-  // Rank within (source, draft_year) by consensus_grade desc. Rows with no
-  // grade fall to the bottom but still get ranked so they count toward
-  // source_count.
   const bySourceYear = new Map<string, Row[]>();
   for (const r of rows) {
     const k = `${r.source}|${r.draft_year}`;
@@ -63,16 +69,34 @@ async function main() {
   }
 
   const ranksByProspect = new Map<string, number[]>();
+  const projPicksByProspect = new Map<string, number[]>();
+  const projRoundsByProspect = new Map<string, number[]>();
   const meta = new Map<
     string,
-    Pick<Row, "draft_year" | "name" | "position"> & {
-      projected_round: number | null;
-      projected_overall_pick: number | null;
-    }
+    Pick<Row, "draft_year" | "name" | "position">
   >();
 
+  const remember = (r: Row) => {
+    if (!meta.has(r.prospect_id)) {
+      meta.set(r.prospect_id, {
+        draft_year: r.draft_year,
+        name: r.name,
+        position: r.position,
+      });
+    }
+    if (r.projected_overall_pick !== null) {
+      const arr = projPicksByProspect.get(r.prospect_id) ?? [];
+      arr.push(Number(r.projected_overall_pick));
+      projPicksByProspect.set(r.prospect_id, arr);
+    }
+    if (r.projected_round !== null) {
+      const arr = projRoundsByProspect.get(r.prospect_id) ?? [];
+      arr.push(Number(r.projected_round));
+      projRoundsByProspect.set(r.prospect_id, arr);
+    }
+  };
+
   for (const [, group] of bySourceYear) {
-    // Higher grade = better. Null grades get the worst rank in their source.
     const withGrade = group
       .filter((r) => r.consensus_grade !== null)
       .sort(
@@ -84,38 +108,23 @@ async function main() {
       const arr = ranksByProspect.get(r.prospect_id) ?? [];
       arr.push(i + 1);
       ranksByProspect.set(r.prospect_id, arr);
-      if (!meta.has(r.prospect_id)) {
-        meta.set(r.prospect_id, {
-          draft_year: r.draft_year,
-          name: r.name,
-          position: r.position,
-          projected_round: r.projected_round,
-          projected_overall_pick: r.projected_overall_pick,
-        });
-      }
+      remember(r);
     });
     const trailingRank = withGrade.length + 1;
     for (const r of withoutGrade) {
       const arr = ranksByProspect.get(r.prospect_id) ?? [];
       arr.push(trailingRank);
       ranksByProspect.set(r.prospect_id, arr);
-      if (!meta.has(r.prospect_id)) {
-        meta.set(r.prospect_id, {
-          draft_year: r.draft_year,
-          name: r.name,
-          position: r.position,
-          projected_round: r.projected_round,
-          projected_overall_pick: r.projected_overall_pick,
-        });
-      }
+      remember(r);
     }
   }
 
   const consensus = Array.from(ranksByProspect.entries()).map(
     ([prospect_id, ranks]) => {
-      const avgRank =
-        ranks.reduce((a, b) => a + b, 0) / ranks.length;
+      const avgRank = ranks.reduce((a, b) => a + b, 0) / ranks.length;
       const m = meta.get(prospect_id)!;
+      const avgPick = mean(projPicksByProspect.get(prospect_id) ?? []);
+      const avgRound = mean(projRoundsByProspect.get(prospect_id) ?? []);
       return {
         prospect_id,
         draft_year: m.draft_year,
@@ -124,8 +133,8 @@ async function main() {
         avg_rank: Number(avgRank.toFixed(2)),
         normalized_grade: rankToGrade(avgRank),
         source_count: ranks.length,
-        projected_round: m.projected_round,
-        projected_overall_pick: m.projected_overall_pick,
+        projected_round: avgRound !== null ? Math.round(avgRound) : null,
+        projected_overall_pick: avgPick !== null ? Math.round(avgPick) : null,
         updated_at: new Date().toISOString(),
       };
     },
@@ -149,8 +158,9 @@ async function main() {
   )) {
     console.log(`\n${year} (${group.length} prospects):`);
     for (const c of group.slice(0, 10)) {
+      const pick = c.projected_overall_pick ?? "—";
       console.log(
-        `  #${c.avg_rank.toFixed(1).padStart(5)} ${c.name} (${c.position ?? "?"}) • grade ${c.normalized_grade} • ${c.source_count} src`,
+        `  #${c.avg_rank.toFixed(1).padStart(5)} ${c.name} (${c.position ?? "?"}) • grade ${c.normalized_grade} • pick ${pick} • ${c.source_count} src`,
       );
     }
     if (group.length > 10) {
