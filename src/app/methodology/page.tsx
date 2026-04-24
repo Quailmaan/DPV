@@ -87,6 +87,34 @@ DPV_normalized = round(DPV_final × 380)  // scaled to 0-10000`}
           </p>
         </div>
 
+        <div>
+          <h2 className="font-semibold text-base">
+            Historical Situation Matching (HSM)
+          </h2>
+          <p>
+            For each active player, we find the 8 most similar (player,
+            season) anchors in NFL history and summarize what happened
+            next. Each anchor becomes a 7-dim feature vector — position,
+            age, usage, context, and a year-over-year PPG delta so a
+            trending-up 22 y.o. doesn&apos;t get comped to a flat-lining
+            one. Distance is scaled Euclidean using per-feature standard
+            deviations over the pool, so tight features (target share)
+            separate more than wide ones (PPG). Similarity decays as{" "}
+            <code className="text-xs">exp(-d/2)</code> — closest comps
+            dominate the weighted average.
+          </p>
+          <p>
+            Projections span three seasons (t+1, t+2, t+3) with weights
+            0.5 / 0.3 / 0.2. If a comp&apos;s tail years aren&apos;t
+            observable yet, the weight redistributes proportionally
+            across remaining horizons rather than dropping the comp. The
+            blended projection feeds DPV at 40% for HIGH confidence
+            (n≥6), 25% MEDIUM (n≥4), 10% LOW, so in the common case the
+            model still dominates but the long-horizon trajectory has a
+            voice.
+          </p>
+        </div>
+
         <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
           <h2 className="font-semibold text-base">Dynasty Rookie Picks</h2>
           <p>
@@ -202,7 +230,6 @@ year_distance: { current: 1.0, +1 year: 0.75, +2 years: 0.55 }`}
         <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
           <h2 className="font-semibold text-base">Planned (v2)</h2>
           <ul className="list-disc pl-6 space-y-1">
-            <li>Multi-year projections with age-adjusted composite</li>
             <li>Percentile-based market delta (normalized across scale gap)</li>
             <li>
               More prospect sources (NFL.com, ESPN, PFF) to reduce consensus

@@ -166,6 +166,9 @@ export default async function PlayerPage({
           anchorAge: number;
           anchorPPG: number;
           nextPPG: number | null;
+          nextPPG1?: number | null;
+          nextPPG2?: number | null;
+          nextPPG3?: number | null;
           similarity: number;
         }>;
         summary: {
@@ -174,6 +177,13 @@ export default async function PlayerPage({
           medianNextPPG: number | null;
           breakoutRate: number | null;
           bustRate: number | null;
+          projectedPPG?: number | null;
+          proj1?: number | null;
+          proj2?: number | null;
+          proj3?: number | null;
+          n1?: number;
+          n2?: number;
+          n3?: number;
         };
       }
     | null;
@@ -483,20 +493,42 @@ export default async function PlayerPage({
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-lg font-semibold">Historical Comps</h2>
             <div className="text-xs text-zinc-500">
-              Cosine similarity on PPG · age · opportunity · context
+              Scaled Euclidean on PPG · age · usage · context · trajectory
             </div>
           </div>
           {hsm.summary.n > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
               <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
                 <div className="text-xs uppercase tracking-wider text-zinc-500">
-                  Mean Next PPG
+                  Year 1 PPG
                 </div>
                 <div className="text-2xl font-bold tabular-nums mt-1">
-                  {hsm.summary.meanNextPPG ?? "—"}
+                  {hsm.summary.proj1 ?? hsm.summary.meanNextPPG ?? "—"}
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
-                  Median {hsm.summary.medianNextPPG ?? "—"} · n={hsm.summary.n}
+                  n={hsm.summary.n1 ?? hsm.summary.n}
+                </div>
+              </div>
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+                <div className="text-xs uppercase tracking-wider text-zinc-500">
+                  Year 2 PPG
+                </div>
+                <div className="text-2xl font-bold tabular-nums mt-1">
+                  {hsm.summary.proj2 ?? "—"}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  n={hsm.summary.n2 ?? 0}
+                </div>
+              </div>
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+                <div className="text-xs uppercase tracking-wider text-zinc-500">
+                  Year 3 PPG
+                </div>
+                <div className="text-2xl font-bold tabular-nums mt-1">
+                  {hsm.summary.proj3 ?? "—"}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  n={hsm.summary.n3 ?? 0}
                 </div>
               </div>
               <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
@@ -509,7 +541,7 @@ export default async function PlayerPage({
                     : "—"}
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
-                  {player.position === "QB" ? "≥20 PPG" : "≥15 PPG"}
+                  {player.position === "QB" ? "≥20 PPG (Y1)" : "≥15 PPG (Y1)"}
                 </div>
               </div>
               <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
@@ -522,20 +554,7 @@ export default async function PlayerPage({
                     : "—"}
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
-                  {player.position === "QB" ? "≤14 PPG" : "≤8 PPG"}
-                </div>
-              </div>
-              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
-                <div className="text-xs uppercase tracking-wider text-zinc-500">
-                  Top Similarity
-                </div>
-                <div className="text-2xl font-bold tabular-nums mt-1">
-                  {hsm.comps[0]
-                    ? hsm.comps[0].similarity.toFixed(3)
-                    : "—"}
-                </div>
-                <div className="text-xs text-zinc-500 mt-1">
-                  Closest historical match
+                  {player.position === "QB" ? "≤14 PPG (Y1)" : "≤8 PPG (Y1)"}
                 </div>
               </div>
             </div>

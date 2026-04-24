@@ -25,11 +25,15 @@ export function runHSM(input: DPVInput): HSMResult {
   if (input.profile.position === "QB" && input.seasons.length < 3) {
     if (confidence === "HIGH") confidence = "MEDIUM";
   }
-  // Use median (more robust to outlier comps) blended slightly toward mean.
+  // Prefer the v2 multi-year similarity-weighted projection (0.5/0.3/0.2
+  // across t+1/t+2/t+3). Falls back to the legacy median/mean blend for
+  // hsm_comps rows written before v2.
   const projectedPPG =
-    pre.medianNextPPG !== null
-      ? 0.6 * pre.medianNextPPG + 0.4 * pre.meanNextPPG
-      : pre.meanNextPPG;
+    pre.projectedPPG !== null && pre.projectedPPG !== undefined
+      ? pre.projectedPPG
+      : pre.medianNextPPG !== null
+        ? 0.6 * pre.medianNextPPG + 0.4 * pre.meanNextPPG
+        : pre.meanNextPPG;
   return {
     projectedPPG,
     confidence,

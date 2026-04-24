@@ -57,6 +57,16 @@ export interface PrecomputedHSM {
   meanNextPPG: number | null;
   medianNextPPG: number | null;
   n: number;
+  // Multi-year similarity-weighted projections (HSM v2). Older hsm_comps
+  // rows won't have these; runtime falls back to the legacy median/mean
+  // blend when projectedPPG is absent.
+  projectedPPG?: number | null;
+  proj1?: number | null;
+  proj2?: number | null;
+  proj3?: number | null;
+  n1?: number;
+  n2?: number;
+  n3?: number;
 }
 
 export interface DPVInput {

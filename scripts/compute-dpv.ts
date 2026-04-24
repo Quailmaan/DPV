@@ -136,6 +136,13 @@ async function main() {
       n: number;
       meanNextPPG: number | null;
       medianNextPPG: number | null;
+      projectedPPG?: number | null;
+      proj1?: number | null;
+      proj2?: number | null;
+      proj3?: number | null;
+      n1?: number;
+      n2?: number;
+      n3?: number;
     };
   }>("hsm_comps");
   const hsmByPlayer = new Map<string, (typeof hsmRows)[number]["summary"]>();
@@ -281,6 +288,13 @@ async function main() {
               meanNextPPG: hsmSummary.meanNextPPG,
               medianNextPPG: hsmSummary.medianNextPPG,
               n: hsmSummary.n,
+              projectedPPG: hsmSummary.projectedPPG,
+              proj1: hsmSummary.proj1,
+              proj2: hsmSummary.proj2,
+              proj3: hsmSummary.proj3,
+              n1: hsmSummary.n1,
+              n2: hsmSummary.n2,
+              n3: hsmSummary.n3,
             }
           : undefined,
       };
