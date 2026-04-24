@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
+import { fetchCombineMetrics } from "@/lib/combine/csv";
 
 // /prospect/[id] — pre-draft prospect detail. Shows what we know before
 // the player has a gsis_id: cross-source consensus grade, per-source ranks,
@@ -32,6 +33,14 @@ function roundLabel(r: number | null): string {
   return "Undrafted FA";
 }
 
+function formatHeight(inches: number | null): string {
+  if (inches === null) return "—";
+  const totalIn = Math.round(inches);
+  const ft = Math.floor(totalIn / 12);
+  const inch = totalIn % 12;
+  return `${ft}'${inch}"`;
+}
+
 export default async function ProspectPage({
   params,
 }: {
@@ -57,6 +66,15 @@ export default async function ProspectPage({
   if (consensusRes.error || !consensusRes.data) return notFound();
   const prospect = consensusRes.data;
   const sources = sourcesRes.data ?? [];
+
+  // Pre-draft prospects aren't in our combine_stats table (that's keyed by
+  // gsis_id which they don't have yet). Fetch nflverse combine.csv directly
+  // and look them up by normalized name + draft_year. Server-side cached
+  // by Next.js with a 1h TTL.
+  const combine = await fetchCombineMetrics(
+    prospect.name,
+    prospect.draft_year,
+  );
 
   // If the prospect has since been drafted (or has a name match in players
   // for the same draft class), let the visitor jump to the full profile.
@@ -214,6 +232,97 @@ export default async function ProspectPage({
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {combine && (
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-lg font-semibold">Combine</h2>
+            <div className="text-xs text-zinc-500">
+              {combine.season} NFL Combine
+              {combine.season !== prospect.draft_year
+                ? ` (attended ${combine.season}, ${prospect.draft_year} class)`
+                : ""}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Height / Weight
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {formatHeight(combine.height_in)}
+                {combine.weight_lb !== null && (
+                  <span className="text-zinc-400 text-base font-normal">
+                    {" · "}
+                    {Math.round(combine.weight_lb)} lb
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                40-yd Dash
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.forty !== null ? combine.forty.toFixed(2) : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">seconds</div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Vertical
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.vertical !== null
+                  ? `${combine.vertical.toFixed(1)}"`
+                  : "—"}
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Broad Jump
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.broad_jump !== null
+                  ? `${Math.round(combine.broad_jump)}"`
+                  : "—"}
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                3-Cone
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.cone !== null ? combine.cone.toFixed(2) : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">seconds</div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                20-yd Shuttle
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.shuttle !== null ? combine.shuttle.toFixed(2) : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">seconds</div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Bench
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.bench !== null ? `${combine.bench}` : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">225 lb reps</div>
+            </div>
+          </div>
+          <p className="text-xs text-zinc-500 mt-2">
+            Raw combine measurements from nflverse. An athleticism composite
+            (RAS-style 0–10) appears on the player profile once this prospect
+            is drafted and lands on a roster.
+          </p>
         </div>
       )}
 
