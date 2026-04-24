@@ -137,11 +137,17 @@ async function main() {
     }
     console.log(`[run ] ${step.name} — ${step.note}`);
     const start = Date.now();
-    // shell:true needed on Windows so PATHEXT resolves `npx` → `npx.cmd`.
-    // Safe here: every cmd/arg in STEPS is a hardcoded literal, no user input.
+    // shell:true is needed on Windows only for bare command names (so PATHEXT
+    // resolves `npx` → `npx.cmd`). For absolute paths like the venv python,
+    // shell:true routes through cmd.exe and breaks on spaces in the repo path
+    // (e.g. "C:\Users\billy\Desktop\FF Site\..."). Detect by looking for any
+    // path separator in cmd. Safe either way: every cmd/arg in STEPS is a
+    // hardcoded literal, no user input.
+    const isAbsolutePath = step.cmd.includes("\\") || step.cmd.includes("/");
+    const useShell = process.platform === "win32" && !isAbsolutePath;
     const r = spawnSync(step.cmd, step.args, {
       stdio: "inherit",
-      shell: process.platform === "win32",
+      shell: useShell,
     });
     const ms = Date.now() - start;
 
