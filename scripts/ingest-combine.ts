@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // Pulls nflverse combine release and upserts into public.combine_stats.
 // Also computes a 0-10 athleticism_score as a lightweight RAS approximation:
@@ -8,9 +8,10 @@ import { createClient } from "@supabase/supabase-js";
 // averaged across available metrics, mapped through the standard-normal CDF.
 //
 // Combine rows use pfr_id; our players table keys by gsis_id. We use the
-// draft_picks.csv crosswalk to translate. Players who went undrafted won't
-// have a gsis_id in that crosswalk and are skipped (no DPV path for them
-// anyway in v1).
+// draft_picks.csv crosswalk to translate. For the current/just-drafted class
+// the crosswalk lags — nflverse hasn't assigned gsis_ids to everyone yet —
+// so we also keep a name+season fallback against our own players table,
+// which picks up rookies as soon as they land on an NFL roster.
 //
 // Restricted to offensive skill positions.
 
@@ -23,6 +24,7 @@ const POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 
 type CombineRow = {
   pfr_id: string;
+  player_name: string;
   season: number;
   position: string;
   height_in: number | null;
@@ -34,6 +36,17 @@ type CombineRow = {
   cone: number | null;
   shuttle: number | null;
 };
+
+// Same normalization used elsewhere (players/rookies pages) so the
+// name+season fallback matches what the UI matches on.
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "")
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function parseHeight(raw: string): number | null {
   // "6-4" → 76 inches. Some rows use "6' 4"" or empty; tolerate both.
@@ -59,6 +72,9 @@ function parseCombineCsv(text: string): CombineRow[] {
   const iSeason = idx("season");
   const iPfr = idx("pfr_id");
   const iPos = idx("pos");
+  // nflverse uses `player_name` on the combine release. Fall back to `player`
+  // defensively in case the column is renamed.
+  const iName = idx("player_name") >= 0 ? idx("player_name") : idx("player");
   const iHt = idx("ht");
   const iWt = idx("wt");
   const iForty = idx("forty");
@@ -79,8 +95,10 @@ function parseCombineCsv(text: string): CombineRow[] {
     if (!pfr || pfr === "NA") continue;
     if (!Number.isFinite(season)) continue;
     if (!POSITIONS.has(position)) continue;
+    const player_name = iName >= 0 ? cols[iName] ?? "" : "";
     rows.push({
       pfr_id: pfr,
+      player_name,
       season,
       position,
       height_in: parseHeight(cols[iHt]),
@@ -115,6 +133,33 @@ async function loadPfrToGsis(): Promise<Map<string, string>> {
     const pfr = cols[iPfr];
     const gsis = cols[iGsis];
     if (pfr && pfr !== "NA" && gsis && gsis !== "NA") map.set(pfr, gsis);
+  }
+  return map;
+}
+
+// Fallback crosswalk: normalized "name|draft_year" → gsis_id sourced from our
+// own players table. Catches rookies who've landed on a roster (so ingest
+// already wrote a players row) but whose pfr_id hasn't been populated in
+// nflverse's draft_picks.csv yet. Paginates because Supabase caps PostgREST
+// responses at 1000.
+async function loadNameSeasonCrosswalk(
+  sb: SupabaseClient,
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const PAGE = 1000;
+  for (let start = 0; ; start += PAGE) {
+    const { data, error } = await sb
+      .from("players")
+      .select("player_id, name, draft_year")
+      .not("draft_year", "is", null)
+      .range(start, start + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    for (const p of data) {
+      if (!p.name || p.draft_year === null) continue;
+      map.set(`${normalizeName(p.name)}|${p.draft_year}`, p.player_id);
+    }
+    if (data.length < PAGE) break;
   }
   return map;
 }
@@ -229,6 +274,10 @@ async function main() {
   const pfrToGsis = await loadPfrToGsis();
   console.log(`  ${pfrToGsis.size} crosswalk entries`);
 
+  console.log("Loading name+season fallback crosswalk from players...");
+  const nameSeasonToGsis = await loadNameSeasonCrosswalk(sb);
+  console.log(`  ${nameSeasonToGsis.size} name+season fallback entries`);
+
   console.log("Computing position-normalized athleticism scores...");
   const posStats = computePositionStats(rows);
   for (const [pos, s] of posStats) {
@@ -257,10 +306,24 @@ async function main() {
 
   const upserts: Upsert[] = [];
   let unmatched = 0;
+  let fallbackHits = 0;
+  const unmatchedBySeason = new Map<number, number>();
   for (const r of rows) {
-    const gsis = pfrToGsis.get(r.pfr_id);
+    let gsis = pfrToGsis.get(r.pfr_id);
+    if (!gsis && r.player_name) {
+      // Fallback: a rookie whose pfr_id hasn't been tagged in draft_picks.csv
+      // yet but who is already on an NFL roster (ingest created a players row
+      // with draft_year = combine season).
+      const key = `${normalizeName(r.player_name)}|${r.season}`;
+      gsis = nameSeasonToGsis.get(key);
+      if (gsis) fallbackHits++;
+    }
     if (!gsis) {
       unmatched++;
+      unmatchedBySeason.set(
+        r.season,
+        (unmatchedBySeason.get(r.season) ?? 0) + 1,
+      );
       continue;
     }
     const stats = posStats.get(r.position);
@@ -285,8 +348,19 @@ async function main() {
     });
   }
   console.log(
-    `  ${upserts.length} combiners matched to gsis_id (${unmatched} unmatched — undrafted or id mismatch)`,
+    `  ${upserts.length} combiners matched to gsis_id (${fallbackHits} via name+season fallback, ${unmatched} unmatched — undrafted or no roster yet)`,
   );
+  if (unmatched > 0) {
+    const byYear = [...unmatchedBySeason.entries()].sort(
+      (a, b) => b[0] - a[0],
+    );
+    const recent = byYear.slice(0, 5);
+    console.log(
+      `  unmatched by season (top 5 recent): ${recent
+        .map(([s, n]) => `${s}:${n}`)
+        .join(", ")}`,
+    );
+  }
 
   // Upsert in chunks. combine_stats has a FK to players(player_id), so any
   // combiner not in our players table is dropped by Supabase. That's fine —

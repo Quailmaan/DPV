@@ -108,6 +108,7 @@ export default async function RookiesPage({
     sourceCount: number | null;
     projectedRound: number | null;
     playerId: string | null;
+    prospectId: string | null;
     team: string | null;
     draftRound: number | null;
     ras: number | null;
@@ -135,6 +136,7 @@ export default async function RookiesPage({
       sourceCount: pr.source_count ?? null,
       projectedRound: pr.projected_round ?? null,
       playerId: player?.player_id ?? null,
+      prospectId: pr.prospect_id,
       team: player?.current_team ?? null,
       draftRound: player?.draft_round ?? null,
       ras:
@@ -166,6 +168,7 @@ export default async function RookiesPage({
       sourceCount: null,
       projectedRound: null,
       playerId: player.player_id,
+      prospectId: null,
       team: player.current_team,
       draftRound: player.draft_round,
       ras:
@@ -298,6 +301,13 @@ export default async function RookiesPage({
                     {r.playerId ? (
                       <Link
                         href={`/player/${r.playerId}?fmt=${fmt}`}
+                        className="hover:underline"
+                      >
+                        {r.name}
+                      </Link>
+                    ) : r.prospectId ? (
+                      <Link
+                        href={`/prospect/${r.prospectId}`}
                         className="hover:underline"
                       >
                         {r.name}
