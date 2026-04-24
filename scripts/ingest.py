@@ -22,11 +22,14 @@ load_dotenv(ROOT / ".env.local")
 
 SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_SECRET_KEY = os.environ["SUPABASE_SECRET_KEY"]
-SEASONS = list(range(2013, 2026))
+# Rosters + weekly stats ingest range. Extended through the incoming class so
+# newly-drafted rookies land in `players` the moment nflverse refreshes.
+SEASONS = list(range(2013, 2027))
 POSITIONS = {"QB", "RB", "WR", "TE"}
 BATCH = 500
 
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
+DRAFT_PICKS_URL = f"{NFLVERSE}/draft_picks/draft_picks.csv"
 
 sb = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 
@@ -84,6 +87,13 @@ def fetch_pfr_rush_advstats() -> pd.DataFrame:
     return pd.read_parquet(url)
 
 
+def fetch_draft_picks() -> pd.DataFrame:
+    """nflverse draft_picks.csv — one row per (season, pick). Provides draft
+    round, overall pick, and the gsis_id crosswalk we need to populate
+    players.draft_round. Usually refreshes within days of each draft."""
+    return pd.read_csv(DRAFT_PICKS_URL)
+
+
 def half_ppr_points(row) -> float:
     return (
         0.04 * (row.get("passing_yards") or 0)
@@ -138,6 +148,26 @@ def ingest_rosters(seasons: list[int]) -> tuple[dict[str, str], dict[str, str]]:
                 sleeper_to_gsis[str(sleeper)] = str(gsis)
         print(f"  crosswalk: {len(sleeper_to_gsis)} sleeper_id -> gsis_id mappings")
 
+    # Pull draft_picks.csv once and build gsis_id → (round, season) lookup.
+    # Falls back gracefully if the CSV isn't reachable — draft_round stays
+    # None, matching previous behavior.
+    draft_idx: dict[str, tuple[int, int]] = {}
+    try:
+        dp = fetch_draft_picks()
+        print(f"  draft_picks: {len(dp)} rows")
+        for _, d in dp.iterrows():
+            gsis = d.get("gsis_id")
+            if pd.isna(gsis) or gsis in ("NA", ""):
+                continue
+            rnd = d.get("round")
+            season = d.get("season")
+            if pd.isna(rnd) or pd.isna(season):
+                continue
+            draft_idx[str(gsis)] = (int(rnd), int(season))
+        print(f"  draft_picks: {len(draft_idx)} gsis_id → (round, season) entries")
+    except Exception as e:
+        print(f"  WARN: draft_picks.csv fetch failed ({e}) — draft_round will be null")
+
     latest = rosters.sort_values("_season").groupby(id_col).tail(1)
     players = []
     for _, r in latest.iterrows():
@@ -145,19 +175,30 @@ def ingest_rosters(seasons: list[int]) -> tuple[dict[str, str], dict[str, str]]:
         name = r[name_col]
         if pd.isna(pid) or pd.isna(name):
             continue
-        round_val = r.get("entry_year")
+        # Prefer draft_picks.csv for (round, year). Fall back to roster
+        # entry_year for undrafted / pre-2000 players that CSV omits.
+        draft_info = draft_idx.get(str(pid))
+        if draft_info is not None:
+            draft_round, draft_year = draft_info
+        else:
+            entry_year = r.get("entry_year")
+            draft_round = None
+            draft_year = (
+                None if pd.isna(entry_year) else int(entry_year) if entry_year else None
+            )
         players.append(
             {
                 "player_id": pid,
                 "name": name,
                 "position": r["position"],
                 "birthdate": None if pd.isna(r["birthdate"]) else r["birthdate"].date().isoformat(),
-                "draft_round": None,
-                "draft_year": None if pd.isna(round_val) else int(round_val) if round_val else None,
+                "draft_round": draft_round,
+                "draft_year": draft_year,
                 "current_team": r.get(team_col) if team_col in r.index else None,
             }
         )
-    print(f"  {len(players)} unique players")
+    drafted = sum(1 for p in players if p["draft_round"] is not None)
+    print(f"  {len(players)} unique players ({drafted} with draft_round from nflverse)")
     batched_upsert("players", players, on_conflict="player_id")
     return pfr_to_gsis, sleeper_to_gsis
 

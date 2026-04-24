@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "refresh": "npx tsx scripts/refresh-all.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.0",

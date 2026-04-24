@@ -2,12 +2,15 @@ import { config as dotenvConfig } from "dotenv";
 dotenvConfig({ path: ".env.local" });
 dotenvConfig();
 import { createClient } from "@supabase/supabase-js";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import { calculateDPV } from "../src/lib/dpv/dpv";
 import { CURRENT_SEASON } from "../src/lib/dpv/constants";
 import {
   computeRookiePrior,
   rookiePriorTier,
 } from "../src/lib/dpv/rookie-prior";
+import { rookieDisplacementModifier } from "../src/lib/dpv/situation";
 import type {
   DPVInput,
   Position,
@@ -66,6 +69,86 @@ function toSeasonStats(row: {
     fumblesLost: row.fumbles_lost ?? 0,
     weeklyFantasyPoints: row.weekly_fantasy_points_half ?? undefined,
   };
+}
+
+// The draft class that just arrived (post-draft, pre-rookie-season). With
+// CURRENT_SEASON reflecting the most-recently-completed NFL season, these
+// rookies have draft_year = CURRENT_SEASON + 1 and are the ones doing the
+// displacing on veteran depth charts this cycle.
+const INCOMING_CLASS_YEAR = CURRENT_SEASON + 1;
+
+type CurveBucket = {
+  minPick: number;
+  maxPick: number;
+  n: number;
+  qualifierRate: number;
+  meanYear1PPG: number;
+  conditionalMeanPPG: number;
+};
+
+type DraftCapitalCurve = {
+  metadata: { computedAt: string; seasonRange: string; totalPicks: number };
+  curve: Record<string, Record<string, CurveBucket>>;
+};
+
+function loadDraftCapitalCurve(): DraftCapitalCurve {
+  const path = resolve("src/lib/dpv/draft-capital-curve.json");
+  return JSON.parse(readFileSync(path, "utf8")) as DraftCapitalCurve;
+}
+
+function bucketThreat(
+  curve: DraftCapitalCurve,
+  position: Position,
+  overallPick: number | null,
+  round: number | null,
+): number {
+  const posCurve = curve.curve[position];
+  if (!posCurve) return 0;
+  if (overallPick !== null) {
+    for (const b of Object.values(posCurve)) {
+      if (overallPick >= b.minPick && overallPick <= b.maxPick)
+        return b.meanYear1PPG;
+    }
+  }
+  // Fallback: estimate overall pick from round midpoint.
+  if (round !== null) {
+    const estPick = Math.round((round - 1) * 32 + 16);
+    for (const b of Object.values(posCurve)) {
+      if (estPick >= b.minPick && estPick <= b.maxPick) return b.meanYear1PPG;
+    }
+  }
+  return 0;
+}
+
+async function fetchDraftPickOverrides(): Promise<Map<string, number>> {
+  // nflverse draft_picks.csv for gsis_id → overall pick. Falls back to empty
+  // map if the CSV isn't reachable or the incoming class isn't in it yet.
+  const CSV_URL =
+    "https://github.com/nflverse/nflverse-data/releases/download/draft_picks/draft_picks.csv";
+  const result = new Map<string, number>();
+  try {
+    const res = await fetch(CSV_URL);
+    if (!res.ok) return result;
+    const text = await res.text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const header = lines[0]
+      .split(",")
+      .map((h) => h.trim().toLowerCase().replace(/^"|"$/g, ""));
+    const iSeason = header.indexOf("season");
+    const iPick = header.indexOf("pick");
+    const iGsis = header.indexOf("gsis_id");
+    if (iSeason < 0 || iPick < 0 || iGsis < 0) return result;
+    for (const line of lines.slice(1)) {
+      const cols = line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
+      const gsis = cols[iGsis];
+      const pick = Number(cols[iPick]);
+      if (!gsis || gsis === "NA" || !Number.isFinite(pick)) continue;
+      result.set(gsis, pick);
+    }
+  } catch (e) {
+    console.warn("draft_picks.csv fetch failed, using round-only pick estimates:", e);
+  }
+  return result;
 }
 
 async function fetchAll<T>(table: string): Promise<T[]> {
@@ -156,6 +239,131 @@ async function main() {
     byPlayer.set(s.player_id, arr);
   }
 
+  console.log("Loading draft capital curve + nflverse pick overrides...");
+  const curve = loadDraftCapitalCurve();
+  const pickByGsis = await fetchDraftPickOverrides();
+  console.log(`  ${pickByGsis.size} player→pick entries`);
+
+  console.log("Loading combine_stats...");
+  const combineRows = await fetchAll<{
+    player_id: string;
+    athleticism_score: number | null;
+  }>("combine_stats");
+  const athleticismByPlayer = new Map<string, number | null>();
+  for (const c of combineRows) {
+    athleticismByPlayer.set(c.player_id, c.athleticism_score);
+  }
+  console.log(`  ${combineRows.length} combine rows`);
+
+  console.log("Loading rookie_hsm_comps...");
+  const rookieHsmRows = await fetchAll<{
+    player_id: string;
+    summary: {
+      n: number;
+      projectedPPG: number | null;
+    };
+  }>("rookie_hsm_comps");
+  const rookieHsmByPlayer = new Map<
+    string,
+    { projectedPPG: number | null; n: number }
+  >();
+  for (const r of rookieHsmRows) {
+    rookieHsmByPlayer.set(r.player_id, {
+      projectedPPG: r.summary?.projectedPPG ?? null,
+      n: r.summary?.n ?? 0,
+    });
+  }
+  console.log(`  ${rookieHsmRows.length} rookie_hsm summaries`);
+
+  // Group current-class (just-drafted) rookies by team|position and order them
+  // by overall pick. Each rookie gets an intraClassDepthIdx equal to the count
+  // of same-team same-position peers drafted ahead of them. Also aggregate
+  // total rookie Year-1-PPG threat per team|position for veteran displacement.
+  type IncomingRookie = {
+    player_id: string;
+    position: Position;
+    team: string;
+    pick: number | null;
+    round: number | null;
+    threatPPG: number;
+  };
+  const incomingByTeamPos = new Map<string, IncomingRookie[]>();
+  for (const p of players) {
+    if (p.draft_year !== INCOMING_CLASS_YEAR) continue;
+    if (!p.current_team) continue;
+    if (!["QB", "RB", "WR", "TE"].includes(p.position)) continue;
+    const pos = p.position as Position;
+    const pick = pickByGsis.get(p.player_id) ?? null;
+    const threat = bucketThreat(curve, pos, pick, p.draft_round);
+    const key = `${p.current_team}|${pos}`;
+    const arr = incomingByTeamPos.get(key) ?? [];
+    arr.push({
+      player_id: p.player_id,
+      position: pos,
+      team: p.current_team,
+      pick,
+      round: p.draft_round,
+      threatPPG: threat,
+    });
+    incomingByTeamPos.set(key, arr);
+  }
+  // Sort each group ascending by pick (earlier pick = lower depth index).
+  // Round is a coarse tiebreaker when overall pick is missing.
+  for (const arr of incomingByTeamPos.values()) {
+    arr.sort((a, b) => {
+      const pa = a.pick ?? (a.round ?? 10) * 32;
+      const pb = b.pick ?? (b.round ?? 10) * 32;
+      return pa - pb;
+    });
+  }
+  const intraDepthByPlayer = new Map<string, number>();
+  const teamPosThreat = new Map<string, number>();
+  for (const [key, arr] of incomingByTeamPos) {
+    let totalThreat = 0;
+    arr.forEach((r, i) => {
+      intraDepthByPlayer.set(r.player_id, i);
+      totalThreat += r.threatPPG;
+    });
+    teamPosThreat.set(key, totalThreat);
+  }
+  const totalIncoming = [...incomingByTeamPos.values()].reduce(
+    (n, arr) => n + arr.length,
+    0,
+  );
+  console.log(
+    `  ${totalIncoming} incoming-class rookies across ${incomingByTeamPos.size} team|position slots`,
+  );
+
+  function priorShareFor(
+    position: Position,
+    row: (typeof seasons)[number] | undefined,
+  ): number | null {
+    if (!row) return null;
+    if (position === "RB") return row.opportunity_share_pct ?? null;
+    if (position === "WR" || position === "TE")
+      return row.target_share_pct ?? null;
+    return row.snap_share_pct ?? null;
+  }
+
+  function displacementFor(
+    position: Position,
+    team: string | null,
+    priorShare: number | null,
+    selfPlayerId: string | null,
+    selfThreatPPG: number,
+  ): number {
+    if (!team) return 1.0;
+    const key = `${team}|${position}`;
+    const total = teamPosThreat.get(key) ?? 0;
+    // If caller is themselves a current-class rookie, subtract their own
+    // threat so they don't displace themselves.
+    const competing =
+      selfPlayerId && intraDepthByPlayer.has(selfPlayerId)
+        ? Math.max(0, total - selfThreatPPG)
+        : total;
+    return rookieDisplacementModifier(competing, priorShare);
+  }
+
   type Prelim = {
     playerId: string;
     position: Position;
@@ -194,16 +402,20 @@ async function main() {
       continue;
     }
 
-    const rawSeasons = (byPlayer.get(p.player_id) ?? [])
+    const allSeasons = byPlayer.get(p.player_id) ?? [];
+    const rawSeasons = allSeasons
       .filter((s) => s.games_played >= 7)
       .sort((a, b) => b.season - a.season);
 
     // Rookie prior path: no qualifying NFL season yet, but drafted recently
     // enough to be a dynasty asset. Emits a forward-looking prior so they
-    // appear in rankings and are tradeable.
+    // appear in rankings and are tradeable. Each post-draft season without a
+    // qualifying year applies a lapse multiplier — the prior assumes a player
+    // will produce on rookie-contract draft capital, and each missed year is
+    // strong evidence against that assumption.
     if (rawSeasons.length === 0) {
       const isRecentDraftee =
-        p.draft_year !== null && p.draft_year >= CURRENT_SEASON - 1;
+        p.draft_year !== null && p.draft_year >= CURRENT_SEASON - 2;
       if (!isRecentDraftee) {
         skipped++;
         continue;
@@ -218,6 +430,38 @@ async function main() {
               new Date(p.birthdate).getTime()) /
             (365.25 * 24 * 3600 * 1000)
           : age;
+      // Count completed NFL seasons since (and including) the rookie year.
+      // draft_year 2024 + CURRENT_SEASON 2025 → 2 completed seasons (2024, 2025),
+      // so 2 missed opportunities to log a qualifying year. An incoming class
+      // (draft_year > CURRENT_SEASON) has 0 missed seasons.
+      const missedSeasons =
+        p.draft_year !== null && p.draft_year <= CURRENT_SEASON
+          ? CURRENT_SEASON - p.draft_year + 1
+          : 0;
+      const maxGamesPlayed = allSeasons.reduce(
+        (m, s) => Math.max(m, s.games_played ?? 0),
+        0,
+      );
+      const intraClassDepthIdx =
+        intraDepthByPlayer.get(p.player_id) ?? 0;
+      const selfThreat = bucketThreat(
+        curve,
+        p.position as Position,
+        pickByGsis.get(p.player_id) ?? null,
+        p.draft_round,
+      );
+      const rookieDisplacementMult =
+        missedSeasons >= 1
+          ? displacementFor(
+              p.position as Position,
+              p.current_team,
+              null,
+              p.player_id,
+              selfThreat,
+            )
+          : 1.0;
+      const athleticismScore = athleticismByPlayer.get(p.player_id) ?? null;
+      const rookieHsm = rookieHsmByPlayer.get(p.player_id);
       for (const fmt of FORMATS) {
         const prior = computeRookiePrior({
           position: p.position as Position,
@@ -226,12 +470,23 @@ async function main() {
           teamOLineRank: teamCtx?.oline_composite_rank ?? null,
           qbTier: (teamCtx?.qb_tier ?? null) as QBTier | null,
           scoringFormat: fmt,
+          missedSeasons,
+          maxGamesPlayed,
+          intraClassDepthIdx,
+          rookieDisplacementMult,
+          athleticismScore,
+          hsmProjectedPPG: rookieHsm?.projectedPPG ?? null,
+          hsmN: rookieHsm?.n ?? 0,
         });
         priorSnapshots.push({
           player_id: p.player_id,
           scoring_format: fmt,
           dpv: prior.dpv,
-          tier: rookiePriorTier(p.position as Position, p.draft_round),
+          tier: rookiePriorTier(
+            p.position as Position,
+            p.draft_round,
+            missedSeasons,
+          ),
           breakdown: prior.breakdown,
         });
       }
@@ -259,6 +514,20 @@ async function main() {
 
     const seasonStats = rawSeasons.slice(0, 3).map(toSeasonStats);
     const hsmSummary = hsmByPlayer.get(p.player_id);
+    const priorShare = priorShareFor(p.position as Position, mostRecent);
+    const selfThreatVet = bucketThreat(
+      curve,
+      p.position as Position,
+      pickByGsis.get(p.player_id) ?? null,
+      p.draft_round,
+    );
+    const rookieDisplacementMult = displacementFor(
+      p.position as Position,
+      p.current_team ?? mostRecent.team,
+      priorShare,
+      p.player_id,
+      selfThreatVet,
+    );
 
     for (const fmt of FORMATS) {
       const input: DPVInput = {
@@ -283,6 +552,7 @@ async function main() {
           qbTransition: "STABLE",
         },
         scoringFormat: fmt,
+        rookieDisplacementMult,
         precomputedHSM: hsmSummary
           ? {
               meanNextPPG: hsmSummary.meanNextPPG,

@@ -38,3 +38,23 @@ export function boomBustModifier(cv: number | null): number {
   if (cv === null) return 1.0;
   return bbcsModifier(cv);
 }
+
+// Displacement dock from incoming rookies at the player's team+position.
+// rookieThreatPPG = sum of draft-capital-curve meanYear1PPG across same-team
+// same-position rookies in the current draft class (self excluded for rookies).
+// priorYearShare = the player's own opportunity/target share last season (0..1).
+//
+// Calibration: a top-10 RB (~18 PPG threat) arriving at a team with a workhorse
+// incumbent (60%+ share) docks ~45%. A late-round rookie (~2 PPG threat) against
+// the same incumbent docks ~5%. Low-share incumbents (<30%) feel less of it
+// because they had less to lose.
+export function rookieDisplacementModifier(
+  rookieThreatPPG: number,
+  priorYearShare: number | null,
+): number {
+  if (rookieThreatPPG <= 0) return 1.0;
+  const shareLoss = Math.min(0.6, rookieThreatPPG * 0.025);
+  const shareWeight =
+    priorYearShare !== null ? Math.min(1, priorYearShare / 0.5) : 0.5;
+  return Math.max(0.4, 1 - shareLoss * shareWeight);
+}

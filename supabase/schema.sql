@@ -177,6 +177,51 @@ alter table public.class_strength
 alter table public.class_strength
   add column if not exists top15_offensive_count int;
 
+-- Rookie-specific HSM comps. Same shape as hsm_comps, but the anchors are
+-- PRE-rookie-year feature vectors (draft pick, age, RAS, team context) and
+-- the "next" PPG columns are Y1/Y2/Y3 of their NFL career. Used by the
+-- rookie prior path to blend an empirical projection into the formula.
+create table if not exists public.rookie_hsm_comps (
+  player_id text primary key references public.players(player_id) on delete cascade,
+  comps jsonb not null,
+  summary jsonb not null,
+  computed_at timestamptz default now()
+);
+
+alter table public.rookie_hsm_comps enable row level security;
+drop policy if exists "public read rookie_hsm_comps" on public.rookie_hsm_comps;
+create policy "public read rookie_hsm_comps" on public.rookie_hsm_comps
+  for select to anon, authenticated using (true);
+
+-- NFL Combine & pro-day measurables. Populated once per player at the combine
+-- (rookie year). The `athleticism_score` column is a 0-10 composite z-scored
+-- within position — a lightweight RAS approximation used exclusively by the
+-- rookie prior path.
+create table if not exists public.combine_stats (
+  player_id text primary key references public.players(player_id) on delete cascade,
+  pfr_id text,
+  combine_season int,
+  position text,
+  height_in numeric,
+  weight_lb numeric,
+  forty numeric,
+  bench int,
+  vertical numeric,
+  broad_jump numeric,
+  cone numeric,
+  shuttle numeric,
+  athleticism_score numeric,
+  metrics_count int,
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_combine_position on public.combine_stats(position);
+
+alter table public.combine_stats enable row level security;
+drop policy if exists "public read combine_stats" on public.combine_stats;
+create policy "public read combine_stats" on public.combine_stats
+  for select to anon, authenticated using (true);
+
 -- ============================================================
 -- RLS
 -- ============================================================

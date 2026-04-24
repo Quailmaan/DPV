@@ -202,7 +202,8 @@ year_distance: { current: 1.0, +1 year: 0.75, +2 years: 0.55 }`}
           × oLineMult(team oline rank)
           × qbTierMult(team qb tier)   // WR / TE only
           × ageMult(prospect age)
-          × formatMult(scoring_format, position)`}
+          × formatMult(scoring_format, position)
+          × lapseMult(missed_seasons, max_games)`}
           </pre>
           <p>
             Base values descend by NFL round: QB R1 ≈ 5500, RB R1 ≈ 5200, WR
@@ -211,6 +212,15 @@ year_distance: { current: 1.0, +1 year: 0.75, +2 years: 0.55 }`}
             full PPR. A prior stays in effect until the rookie accumulates a
             qualifying season of real production, at which point the standard
             DPV path takes over.
+          </p>
+          <p>
+            <b>Lapse decay:</b> the prior assumes draft capital will translate
+            into production. Each post-draft season that passes without a
+            qualifying (7+ game) year is strong evidence against that
+            assumption, so the prior decays — 1 missed year ≈ 0.45–0.55×, 2
+            missed years ≈ 0.22×, 3+ ≈ 0.10×. A player drafted in 2024 who
+            logged only 3 games across their first two seasons gets priced as
+            a depth flier, not a fresh R2 rookie.
           </p>
         </div>
 

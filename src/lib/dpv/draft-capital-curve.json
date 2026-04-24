@@ -1,0 +1,273 @@
+{
+  "metadata": {
+    "computedAt": "2026-04-24T03:10:10.848Z",
+    "seasonRange": "2013-2025",
+    "totalPicks": 1028
+  },
+  "curve": {
+    "QB": {
+      "1-10": {
+        "minPick": 1,
+        "maxPick": 10,
+        "n": 28,
+        "qualifierRate": 0.8214,
+        "meanYear1PPG": 11.747,
+        "conditionalMeanPPG": 14.301
+      },
+      "11-20": {
+        "minPick": 11,
+        "maxPick": 20,
+        "n": 7,
+        "qualifierRate": 1,
+        "meanYear1PPG": 14.03,
+        "conditionalMeanPPG": 14.03
+      },
+      "21-32": {
+        "minPick": 21,
+        "maxPick": 32,
+        "n": 6,
+        "qualifierRate": 0.5,
+        "meanYear1PPG": 6.745,
+        "conditionalMeanPPG": 13.49
+      },
+      "33-50": {
+        "minPick": 33,
+        "maxPick": 50,
+        "n": 5,
+        "qualifierRate": 0.8,
+        "meanYear1PPG": 9.886,
+        "conditionalMeanPPG": 12.358
+      },
+      "51-75": {
+        "minPick": 51,
+        "maxPick": 75,
+        "n": 11,
+        "qualifierRate": 0.3636,
+        "meanYear1PPG": 3.945,
+        "conditionalMeanPPG": 10.848
+      },
+      "76-100": {
+        "minPick": 76,
+        "maxPick": 100,
+        "n": 12,
+        "qualifierRate": 0.25,
+        "meanYear1PPG": 1.509,
+        "conditionalMeanPPG": 6.035
+      },
+      "101-150": {
+        "minPick": 101,
+        "maxPick": 150,
+        "n": 27,
+        "qualifierRate": 0.1852,
+        "meanYear1PPG": 1.943,
+        "conditionalMeanPPG": 10.493
+      },
+      "151+": {
+        "minPick": 151,
+        "maxPick": 300,
+        "n": 54,
+        "qualifierRate": 0.0741,
+        "meanYear1PPG": 0.748,
+        "conditionalMeanPPG": 10.093
+      }
+    },
+    "RB": {
+      "1-10": {
+        "minPick": 1,
+        "maxPick": 10,
+        "n": 7,
+        "qualifierRate": 1,
+        "meanYear1PPG": 15.812,
+        "conditionalMeanPPG": 15.812
+      },
+      "11-20": {
+        "minPick": 11,
+        "maxPick": 20,
+        "n": 2,
+        "qualifierRate": 1,
+        "meanYear1PPG": 10.482,
+        "conditionalMeanPPG": 10.482
+      },
+      "21-32": {
+        "minPick": 21,
+        "maxPick": 32,
+        "n": 7,
+        "qualifierRate": 0.8571,
+        "meanYear1PPG": 10.062,
+        "conditionalMeanPPG": 11.739
+      },
+      "33-50": {
+        "minPick": 33,
+        "maxPick": 50,
+        "n": 17,
+        "qualifierRate": 0.8824,
+        "meanYear1PPG": 10.01,
+        "conditionalMeanPPG": 11.345
+      },
+      "51-75": {
+        "minPick": 51,
+        "maxPick": 75,
+        "n": 27,
+        "qualifierRate": 0.9259,
+        "meanYear1PPG": 7.424,
+        "conditionalMeanPPG": 8.018
+      },
+      "76-100": {
+        "minPick": 76,
+        "maxPick": 100,
+        "n": 23,
+        "qualifierRate": 0.6957,
+        "meanYear1PPG": 5.282,
+        "conditionalMeanPPG": 7.593
+      },
+      "101-150": {
+        "minPick": 101,
+        "maxPick": 150,
+        "n": 71,
+        "qualifierRate": 0.831,
+        "meanYear1PPG": 4.477,
+        "conditionalMeanPPG": 5.388
+      },
+      "151+": {
+        "minPick": 151,
+        "maxPick": 300,
+        "n": 123,
+        "qualifierRate": 0.4146,
+        "meanYear1PPG": 1.733,
+        "conditionalMeanPPG": 4.179
+      }
+    },
+    "WR": {
+      "1-10": {
+        "minPick": 1,
+        "maxPick": 10,
+        "n": 18,
+        "qualifierRate": 0.8889,
+        "meanYear1PPG": 8.552,
+        "conditionalMeanPPG": 9.621
+      },
+      "11-20": {
+        "minPick": 11,
+        "maxPick": 20,
+        "n": 15,
+        "qualifierRate": 0.9333,
+        "meanYear1PPG": 8.385,
+        "conditionalMeanPPG": 8.984
+      },
+      "21-32": {
+        "minPick": 21,
+        "maxPick": 32,
+        "n": 24,
+        "qualifierRate": 0.875,
+        "meanYear1PPG": 7.382,
+        "conditionalMeanPPG": 8.437
+      },
+      "33-50": {
+        "minPick": 33,
+        "maxPick": 50,
+        "n": 34,
+        "qualifierRate": 0.9412,
+        "meanYear1PPG": 7.01,
+        "conditionalMeanPPG": 7.448
+      },
+      "51-75": {
+        "minPick": 51,
+        "maxPick": 75,
+        "n": 44,
+        "qualifierRate": 0.9091,
+        "meanYear1PPG": 5.217,
+        "conditionalMeanPPG": 5.739
+      },
+      "76-100": {
+        "minPick": 76,
+        "maxPick": 100,
+        "n": 41,
+        "qualifierRate": 0.8293,
+        "meanYear1PPG": 3.588,
+        "conditionalMeanPPG": 4.326
+      },
+      "101-150": {
+        "minPick": 101,
+        "maxPick": 150,
+        "n": 72,
+        "qualifierRate": 0.6528,
+        "meanYear1PPG": 2.208,
+        "conditionalMeanPPG": 3.383
+      },
+      "151+": {
+        "minPick": 151,
+        "maxPick": 300,
+        "n": 167,
+        "qualifierRate": 0.3952,
+        "meanYear1PPG": 1.23,
+        "conditionalMeanPPG": 3.113
+      }
+    },
+    "TE": {
+      "1-10": {
+        "minPick": 1,
+        "maxPick": 10,
+        "n": 4,
+        "qualifierRate": 1,
+        "meanYear1PPG": 6.474,
+        "conditionalMeanPPG": 6.474
+      },
+      "11-20": {
+        "minPick": 11,
+        "maxPick": 20,
+        "n": 4,
+        "qualifierRate": 1,
+        "meanYear1PPG": 8.371,
+        "conditionalMeanPPG": 8.371
+      },
+      "21-32": {
+        "minPick": 21,
+        "maxPick": 32,
+        "n": 5,
+        "qualifierRate": 1,
+        "meanYear1PPG": 5.948,
+        "conditionalMeanPPG": 5.948
+      },
+      "33-50": {
+        "minPick": 33,
+        "maxPick": 50,
+        "n": 17,
+        "qualifierRate": 1,
+        "meanYear1PPG": 4.859,
+        "conditionalMeanPPG": 4.859
+      },
+      "51-75": {
+        "minPick": 51,
+        "maxPick": 75,
+        "n": 16,
+        "qualifierRate": 0.6875,
+        "meanYear1PPG": 2.618,
+        "conditionalMeanPPG": 3.809
+      },
+      "76-100": {
+        "minPick": 76,
+        "maxPick": 100,
+        "n": 21,
+        "qualifierRate": 0.6667,
+        "meanYear1PPG": 2.55,
+        "conditionalMeanPPG": 3.826
+      },
+      "101-150": {
+        "minPick": 101,
+        "maxPick": 150,
+        "n": 45,
+        "qualifierRate": 0.6889,
+        "meanYear1PPG": 2.409,
+        "conditionalMeanPPG": 3.497
+      },
+      "151+": {
+        "minPick": 151,
+        "maxPick": 300,
+        "n": 74,
+        "qualifierRate": 0.2297,
+        "meanYear1PPG": 0.885,
+        "conditionalMeanPPG": 3.85
+      }
+    }
+  }
+}

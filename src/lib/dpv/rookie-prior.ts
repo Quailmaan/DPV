@@ -110,6 +110,34 @@ export type RookiePriorInput = {
   teamOLineRank: number | null;
   qbTier: QBTier | null;
   scoringFormat: ScoringFormat;
+  // Seasons completed since draft without a qualifying (7+ game) year.
+  // 0 = incoming class or rookie year not yet played out.
+  // 1 = one rookie season burned without a qualifying year.
+  // 2+ = multi-year wash — the prior should be heavily lapsed.
+  missedSeasons?: number;
+  // Max games played across any season on record (incl. sub-7 games).
+  // Used to distinguish "IR'd all year" (0) from "flashed, then hurt" (3-6).
+  maxGamesPlayed?: number;
+  // How many same-team, same-position rookies in the same draft class were
+  // drafted earlier (lower overall pick). 0 = alone or highest-drafted at the
+  // position. 1 = second in stack. Docks Year-1 opportunity expectations
+  // because depth-chart reality caps touches regardless of draft capital.
+  intraClassDepthIdx?: number;
+  // Post-draft displacement from same-team same-position rookies in the
+  // CURRENT class. For lapsed rookies (missedSeasons >= 1) — fresh rookies
+  // get intraClassDepth instead, so they don't double-dock.
+  rookieDisplacementMult?: number;
+  // 0-10 athleticism composite from combine_stats.athleticism_score.
+  // Null/undefined = no combine data → neutral 1.0× mult.
+  athleticismScore?: number | null;
+  // HSM-derived projection (similarity-weighted Y1/Y2/Y3 half-PPR PPG blend)
+  // from compute-rookie-hsm.ts. When present, blends into the final prior so
+  // historically-comparable outcomes pull the multiplicative DPV toward the
+  // empirical distribution. Null = no comps available → blend skipped.
+  hsmProjectedPPG?: number | null;
+  // Effective comp count for this rookie (top-K, capped by pool size).
+  // Drives the HSM blend weight — fewer comps = less confidence.
+  hsmN?: number;
 };
 
 export type RookiePriorResult = {
@@ -121,8 +149,81 @@ export type RookiePriorResult = {
     qbTierMult: number;
     ageMult: number;
     formatMult: number;
+    lapseMult: number;
+    intraClassDepthMult: number;
+    rookieDisplacementMult: number;
+    combineMult: number;
+    athleticismScore: number | null;
+    missedSeasons: number;
+    // HSM blend diagnostics (null = HSM skipped).
+    hsmMult: number;
+    hsmProjectedPPG: number | null;
+    hsmN: number;
+    hsmWeight: number;
+    preHsmDPV: number;
   };
 };
+
+// Decay applied when a drafted rookie has failed to log a qualifying season.
+// The prior assumes "team invested draft capital, player will produce" — each
+// year that passes without that production is strong evidence against it.
+function lapseMultiplier(missedSeasons: number, maxGamesPlayed: number): number {
+  if (missedSeasons <= 0) return 1.0;
+  if (missedSeasons === 1) {
+    // One rookie year burned. Distinguish zero games (likely IR/redshirt) from
+    // a partial season (tried and faded). Either way, sizable decay.
+    return maxGamesPlayed >= 3 ? 0.55 : 0.45;
+  }
+  if (missedSeasons === 2) return 0.22;
+  // 3+ missed seasons — at this point a rookie prior is largely fiction.
+  return 0.1;
+}
+
+// Dock rookies who are stacked behind same-team same-position peers in the
+// same draft class. depthIdx = # of same-team/pos rookies drafted earlier.
+// Depth-chart reality caps Year-1 opportunity regardless of capital — the
+// second RB a team takes in a class rarely gets workhorse touches.
+export function intraClassDepthAdjust(depthIdx: number): number {
+  if (depthIdx <= 0) return 1.0;
+  if (depthIdx === 1) return 0.55;
+  if (depthIdx === 2) return 0.35;
+  return 0.25;
+}
+
+// Convert a similarity-weighted Y1/Y2/Y3 half-PPR PPG projection into an
+// equivalent DPV. The mapping is a mild power curve (PPG^1.6 × 50) calibrated
+// so 20 PPG ≈ 6000 DPV (workhorse RB/WR1), 10 PPG ≈ 2000 DPV (flex starter),
+// 5 PPG ≈ 650 DPV (bench depth). QBs get a slight discount — 20 PPG is less
+// rare at QB — and TEs a small premium to reflect positional scarcity.
+export function hsmProjectionToDPV(ppg: number, position: Position): number {
+  const base = Math.pow(Math.max(0, ppg), 1.6) * 50;
+  const posAdj =
+    position === "QB" ? 0.85 : position === "TE" ? 1.1 : 1.0;
+  return Math.max(0, Math.min(8000, base * posAdj));
+}
+
+// Blend weight grows with comp count. Caps at 0.4 — even with 8 perfect
+// comps, the structural prior (draft capital, landing spot, age) remains
+// the dominant signal.
+export function hsmBlendWeightFromCount(n: number): number {
+  if (n <= 0) return 0;
+  if (n >= 8) return 0.4;
+  return 0.05 * n;
+}
+
+// Combine/RAS adjustment. athleticism_score is 0-10 (position-normalized),
+// derived in ingest-combine.ts. Kept conservative — athletic profile moves
+// outcomes but draft capital remains the dominant signal. Null = no combine
+// data on record → neutral.
+export function combineAdjust(score: number | null | undefined): number {
+  if (score === null || score === undefined) return 1.0;
+  if (score >= 9) return 1.15;
+  if (score >= 7.5) return 1.08;
+  if (score >= 6) return 1.03;
+  if (score >= 4) return 1.0;
+  if (score >= 2.5) return 0.95;
+  return 0.88;
+}
 
 export function computeRookiePrior(
   input: RookiePriorInput,
@@ -137,11 +238,53 @@ export function computeRookiePrior(
   const qbTierMult = qbTierAdjust(input.position, (input.qbTier ?? 3) as QBTier);
   const ageMult = ageAdjust(input.ageAtDraft);
   const formatMult = FORMAT_MULT[input.position][input.scoringFormat];
+  const missed = input.missedSeasons ?? 0;
+  const lapseMult = lapseMultiplier(missed, input.maxGamesPlayed ?? 0);
 
-  const dpv = Math.round(base * oLineMult * qbTierMult * ageMult * formatMult);
+  // Fresh rookies (missed=0) use intraClassDepth; lapsed rookies have already
+  // been absorbed into the team and instead face displacement from NEW rookies.
+  const intraClassDepthMult =
+    missed === 0 ? intraClassDepthAdjust(input.intraClassDepthIdx ?? 0) : 1.0;
+  const displacementMult =
+    missed >= 1 ? input.rookieDisplacementMult ?? 1.0 : 1.0;
+  const combineMult = combineAdjust(input.athleticismScore);
+
+  const preHsmDPV =
+    base *
+    oLineMult *
+    qbTierMult *
+    ageMult *
+    formatMult *
+    lapseMult *
+    intraClassDepthMult *
+    displacementMult *
+    combineMult;
+
+  // HSM blend — if nearest-neighbor rookies with similar pre-draft profiles
+  // produced around X PPG over their first three years, pull the structural
+  // prior toward the PPG-equivalent DPV. Weight scales with comp count, caps
+  // at 0.4 so draft capital / landing spot remain the dominant signal.
+  //
+  // Fresh rookies only (missed === 0). Lapsed rookies already have Y1 non-
+  // production as observed evidence against the pre-draft profile — blending
+  // in "what similar prospects did Y1/Y2/Y3" would paper over that signal and
+  // fight the lapseMult directionally.
+  const hsmPPG = input.hsmProjectedPPG ?? null;
+  const hsmN = input.hsmN ?? 0;
+  let hsmMult = 1.0;
+  let hsmWeight = 0;
+  let finalDPV = preHsmDPV;
+  if (missed === 0 && hsmPPG !== null && hsmN > 0 && preHsmDPV > 0) {
+    hsmWeight = hsmBlendWeightFromCount(hsmN);
+    if (hsmWeight > 0) {
+      const hsmDPV = hsmProjectionToDPV(hsmPPG, input.position);
+      finalDPV = preHsmDPV * (1 - hsmWeight) + hsmDPV * hsmWeight;
+      hsmMult = finalDPV / preHsmDPV;
+    }
+  }
 
   return {
-    dpv,
+    dpv: Math.round(finalDPV),
     breakdown: {
       kind: "rookie_prior",
       base,
@@ -149,19 +292,45 @@ export function computeRookiePrior(
       qbTierMult: Number(qbTierMult.toFixed(3)),
       ageMult: Number(ageMult.toFixed(3)),
       formatMult: Number(formatMult.toFixed(3)),
+      lapseMult: Number(lapseMult.toFixed(3)),
+      intraClassDepthMult: Number(intraClassDepthMult.toFixed(3)),
+      rookieDisplacementMult: Number(displacementMult.toFixed(3)),
+      combineMult: Number(combineMult.toFixed(3)),
+      athleticismScore:
+        input.athleticismScore !== null && input.athleticismScore !== undefined
+          ? Number(input.athleticismScore)
+          : null,
+      missedSeasons: missed,
+      hsmMult: Number(hsmMult.toFixed(3)),
+      hsmProjectedPPG: hsmPPG !== null ? Number(hsmPPG) : null,
+      hsmN,
+      hsmWeight: Number(hsmWeight.toFixed(3)),
+      preHsmDPV: Math.round(preHsmDPV),
     },
   };
 }
 
 // Tier naming for rookie priors — separate from the veteran tier system so the
-// UI can show "Rookie — R1 Prior" etc. and readers know this is forward-looking.
+// UI can show readers that this value is forward-looking, and distinguishes
+// fresh rookies from players with draft capital who haven't produced.
 export function rookiePriorTier(
   position: Position,
   draftRound: number | null,
+  missedSeasons: number = 0,
 ): string {
-  if (draftRound === null) return `Rookie ${position} UDFA`;
-  if (draftRound === 1) return `Rookie ${position} R1`;
-  if (draftRound === 2) return `Rookie ${position} R2`;
-  if (draftRound <= 4) return `Rookie ${position} Day 2/3`;
-  return `Rookie ${position} Late`;
+  const capital =
+    draftRound === null
+      ? "Undrafted"
+      : draftRound === 1
+        ? "1st-Round"
+        : draftRound === 2
+          ? "2nd-Round"
+          : draftRound <= 4
+            ? "Day 2/3"
+            : "Late-Round";
+  // Past their rookie year without qualifying — they're no longer "rookies"
+  // in the dynasty sense. Drop the word and describe the state instead.
+  if (missedSeasons >= 2) return `Lapsed ${capital} ${position}`;
+  if (missedSeasons === 1) return `Stalled ${capital} ${position}`;
+  return `${capital} Rookie ${position}`;
 }

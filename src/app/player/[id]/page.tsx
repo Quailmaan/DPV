@@ -194,6 +194,8 @@ export default async function PlayerPage({
     qbTierMult: number;
     ageMult: number;
     formatMult: number;
+    lapseMult?: number;
+    missedSeasons?: number;
   };
   const rawBreakdown = snapshot?.breakdown as
     | DPVBreakdown
@@ -392,6 +394,15 @@ export default async function PlayerPage({
             forward-looking prior based on draft capital, landing spot, and
             age. Replaced by a production-based DPV as soon as they log 7+
             games in a season.
+            {(priorBreakdown.missedSeasons ?? 0) > 0 && (
+              <span>
+                {" "}
+                <b>Lapse decay applied:</b>{" "}
+                {priorBreakdown.missedSeasons} post-draft season
+                {(priorBreakdown.missedSeasons ?? 0) === 1 ? "" : "s"} without
+                a qualifying year.
+              </span>
+            )}
           </div>
           <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
             <table className="w-full text-sm">
@@ -415,6 +426,15 @@ export default async function PlayerPage({
                       "Format Adjust",
                       `×${priorBreakdown.formatMult.toFixed(2)}`,
                     ],
+                    ...(priorBreakdown.lapseMult !== undefined &&
+                    priorBreakdown.lapseMult < 1
+                      ? ([
+                          [
+                            "Lapse Decay",
+                            `×${priorBreakdown.lapseMult.toFixed(2)}`,
+                          ],
+                        ] as Array<[string, string]>)
+                      : []),
                   ] as Array<[string, string]>
                 ).map(([label, value]) => (
                   <tr

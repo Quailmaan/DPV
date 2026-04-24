@@ -18,8 +18,8 @@ const DPV_SCALE_CONSTANT = 380;
 const DPV_MAX = 10000;
 
 // Rank-based tiers (12-team league starter counts per position).
-// Elite ≈ top starters, Strong Starter ≈ rest of weekly starters,
-// Flex/Depth ≈ flex/bench, Bench Stash ≈ deep roster, else Replacement.
+// Elite ≈ top starters, Weekly Starter ≈ rest of weekly starters,
+// Flex Option ≈ flex/bench, Depth Piece ≈ deep roster, else Waiver Wire.
 const TIER_THRESHOLDS: Record<
   Position,
   { elite: number; strong: number; flex: number; stash: number }
@@ -34,13 +34,13 @@ function classifyTier(
   position: Position,
   positionRank: number | undefined,
 ): string {
-  if (!positionRank) return "Replacement";
+  if (!positionRank) return "Waiver Wire";
   const t = TIER_THRESHOLDS[position];
   if (positionRank <= t.elite) return "Elite";
-  if (positionRank <= t.strong) return "Strong Starter";
-  if (positionRank <= t.flex) return "Flex/Depth";
-  if (positionRank <= t.stash) return "Bench Stash";
-  return "Replacement";
+  if (positionRank <= t.strong) return "Weekly Starter";
+  if (positionRank <= t.flex) return "Flex Option";
+  if (positionRank <= t.stash) return "Depth Piece";
+  return "Waiver Wire";
 }
 
 export function calculateDPV(input: DPVInput): DPVResult {
@@ -79,7 +79,8 @@ export function calculateDPV(input: DPVInput): DPVResult {
   const scarcity = input.positionRank
     ? scarcityMultiplier(input.positionRank)
     : 1.0;
-  const scaled = dpvFinal * scarcity;
+  const rookieDisplacement = input.rookieDisplacementMult ?? 1.0;
+  const scaled = dpvFinal * scarcity * rookieDisplacement;
   const normalized = Math.max(
     0,
     Math.min(DPV_MAX, Math.round(scaled * DPV_SCALE_CONSTANT)),
@@ -94,6 +95,7 @@ export function calculateDPV(input: DPVInput): DPVResult {
     bbcsModifier: bbcs,
     scoringFormatWeight: sfw,
     scarcityMultiplier: scarcity,
+    rookieDisplacementMult: rookieDisplacement,
     dpvRaw,
     dpvProjected,
     dpvFinal: scaled,

@@ -43,6 +43,12 @@ export default function RootLayout({
                 Rankings
               </Link>
               <Link
+                href="/rookies"
+                className="hover:text-zinc-900 dark:hover:text-zinc-100"
+              >
+                Rookies
+              </Link>
+              <Link
                 href="/league"
                 className="hover:text-zinc-900 dark:hover:text-zinc-100"
               >

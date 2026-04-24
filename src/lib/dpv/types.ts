@@ -78,6 +78,10 @@ export interface DPVInput {
   marketValueNormalized?: number;
   positionRank?: number;
   precomputedHSM?: PrecomputedHSM;
+  // Pre-computed rookie displacement multiplier (≤ 1.0). Caller resolves
+  // team+position rookie threat from the draft-capital curve and passes in.
+  // Omit or pass 1.0 when there's no incoming rookie threat.
+  rookieDisplacementMult?: number;
 }
 
 export interface DPVBreakdown {
@@ -89,6 +93,7 @@ export interface DPVBreakdown {
   bbcsModifier: number;
   scoringFormatWeight: number;
   scarcityMultiplier: number;
+  rookieDisplacementMult: number;
   dpvRaw: number;
   dpvProjected: number;
   dpvFinal: number;

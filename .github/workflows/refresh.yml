@@ -15,22 +15,35 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      - name: Sync current teams from Sleeper
-        run: npx tsx scripts/sync-teams.ts
-      - name: Sync draft capital from nflverse
-        run: npx tsx scripts/sync-draft-capital.ts
-      - name: Recompute DPV snapshots
-        run: npx tsx scripts/compute-dpv.ts
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: scripts/requirements.txt
+      - name: Install Python deps
+        run: pip install -r scripts/requirements.txt
+
+      # Full DPV pipeline: nflverse ingest → team/draft sync → combine →
+      # prospect consensus → class strength → HSM → rookie HSM → DPV snapshots.
+      # Orchestrator fails fast on any step so stale downstream data isn't
+      # written on top of a broken upstream step.
+      - name: Refresh DPV data
+        run: npm run refresh
+
+      # League rosters are scoped to the user's synced Sleeper leagues and sit
+      # outside the core DPV pipeline, so they run after the rankings refresh.
       - name: Refresh synced Sleeper league rosters
         run: npx tsx scripts/sync-leagues.ts
