@@ -34,6 +34,17 @@ const sb = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
 const FORMATS: ScoringFormat[] = ["STANDARD", "HALF_PPR", "FULL_PPR"];
 const TODAY = new Date("2026-04-22");
 
+// Match the /rookies page name normalization so the consensus-match gate
+// on rookie priors uses the same join key.
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "")
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function computeAge(birthdate: string | null): number | null {
   if (!birthdate) return null;
   const bd = new Date(birthdate);
@@ -255,6 +266,25 @@ async function main() {
   }
   console.log(`  ${combineRows.length} combine rows`);
 
+  console.log("Loading prospect_consensus names...");
+  const prospectRows = await fetchAll<{ name: string; draft_year: number | null }>(
+    "prospect_consensus",
+  );
+  // Only gate against names from the incoming + recently-drafted windows we
+  // actually emit priors for. A cross-class normalized-name collision is
+  // unlikely, and this keeps the gate scoped to relevant classes.
+  const consensusNames = new Set<string>();
+  for (const pr of prospectRows) {
+    if (
+      pr.draft_year !== null &&
+      pr.draft_year >= CURRENT_SEASON - 2 &&
+      pr.draft_year <= INCOMING_CLASS_YEAR
+    ) {
+      consensusNames.add(normalizeName(pr.name));
+    }
+  }
+  console.log(`  ${consensusNames.size} normalized consensus names in window`);
+
   console.log("Loading rookie_hsm_comps...");
   const rookieHsmRows = await fetchAll<{
     player_id: string;
@@ -417,6 +447,19 @@ async function main() {
       const isRecentDraftee =
         p.draft_year !== null && p.draft_year >= CURRENT_SEASON - 2;
       if (!isRecentDraftee) {
+        skipped++;
+        continue;
+      }
+      // Gate: require real draft capital OR a prospect_consensus match.
+      // nflverse backfills draft_year from entry_year (practice-squad /
+      // futures signings), which floods /rookies and position rankings
+      // with non-prospects when draft_round is null. If a UDFA was tracked
+      // as a prospect (their name appears in prospect_consensus), they
+      // still make it through.
+      if (
+        p.draft_round === null &&
+        !consensusNames.has(normalizeName(p.name))
+      ) {
         skipped++;
         continue;
       }

@@ -148,8 +148,13 @@ export default async function RookiesPage({
   }
 
   // 2. Drafted rookies who aren't in prospects (late-round surprises).
+  // Require draft_round !== null so nflverse "entry_year" camp bodies (futures
+  // contracts, practice-squad signings) don't masquerade as incoming-class
+  // rookies. A legit post-draft UDFA signing who was tracked as a prospect
+  // still surfaces via the prospect-first loop above.
   for (const player of players) {
     if (seenPlayerIds.has(player.player_id)) continue;
+    if (player.draft_round === null) continue;
     const c = combineByPlayer.get(player.player_id);
     const s = snapByPlayer.get(player.player_id);
     rows.push({
