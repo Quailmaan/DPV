@@ -103,6 +103,23 @@ function scarcityLabel(v: number): string {
   return "Abundant";
 }
 
+// Height in inches → 6'1" style string. Handles fractional values (e.g. 73.5).
+function formatHeight(inches: number | null): string {
+  if (inches === null) return "—";
+  const totalIn = Math.round(inches);
+  const ft = Math.floor(totalIn / 12);
+  const inch = totalIn % 12;
+  return `${ft}'${inch}"`;
+}
+
+// RAS-style 0-10 color. Matches the /rookies table thresholds.
+function rasColorClass(v: number | null): string {
+  if (v === null) return "text-zinc-400";
+  if (v >= 8) return "text-emerald-600 dark:text-emerald-400 font-semibold";
+  if (v >= 5) return "text-zinc-700 dark:text-zinc-200";
+  return "text-rose-600 dark:text-rose-400";
+}
+
 function hsmLabel(v: string): string {
   const c = v.toUpperCase();
   if (c === "HIGH") return "High confidence";
@@ -124,32 +141,40 @@ export default async function PlayerPage({
 
   const sb = createServerClient();
 
-  const [playerRes, seasonsRes, snapshotRes, marketRes, hsmRes] = await Promise.all([
-    sb.from("players").select("*").eq("player_id", id).maybeSingle(),
-    sb
-      .from("player_seasons")
-      .select("*")
-      .eq("player_id", id)
-      .order("season", { ascending: false }),
-    sb
-      .from("dpv_snapshots")
-      .select("*")
-      .eq("player_id", id)
-      .eq("scoring_format", fmt)
-      .maybeSingle(),
-    sb
-      .from("market_values")
-      .select("market_value_normalized, position_rank, overall_rank")
-      .eq("player_id", id)
-      .eq("scoring_format", fmt)
-      .eq("source", "fantasycalc")
-      .maybeSingle(),
-    sb
-      .from("hsm_comps")
-      .select("comps, summary")
-      .eq("player_id", id)
-      .maybeSingle(),
-  ]);
+  const [playerRes, seasonsRes, snapshotRes, marketRes, hsmRes, combineRes] =
+    await Promise.all([
+      sb.from("players").select("*").eq("player_id", id).maybeSingle(),
+      sb
+        .from("player_seasons")
+        .select("*")
+        .eq("player_id", id)
+        .order("season", { ascending: false }),
+      sb
+        .from("dpv_snapshots")
+        .select("*")
+        .eq("player_id", id)
+        .eq("scoring_format", fmt)
+        .maybeSingle(),
+      sb
+        .from("market_values")
+        .select("market_value_normalized, position_rank, overall_rank")
+        .eq("player_id", id)
+        .eq("scoring_format", fmt)
+        .eq("source", "fantasycalc")
+        .maybeSingle(),
+      sb
+        .from("hsm_comps")
+        .select("comps, summary")
+        .eq("player_id", id)
+        .maybeSingle(),
+      sb
+        .from("combine_stats")
+        .select(
+          "combine_season, height_in, weight_lb, forty, bench, vertical, broad_jump, cone, shuttle, athleticism_score, metrics_count",
+        )
+        .eq("player_id", id)
+        .maybeSingle(),
+    ]);
 
   if (playerRes.error || !playerRes.data) return notFound();
 
@@ -157,6 +182,21 @@ export default async function PlayerPage({
   const seasons = seasonsRes.data ?? [];
   const snapshot = snapshotRes.data;
   const market = marketRes.data;
+  const combine = combineRes.data as
+    | {
+        combine_season: number | null;
+        height_in: number | null;
+        weight_lb: number | null;
+        forty: number | null;
+        bench: number | null;
+        vertical: number | null;
+        broad_jump: number | null;
+        cone: number | null;
+        shuttle: number | null;
+        athleticism_score: number | null;
+        metrics_count: number | null;
+      }
+    | null;
   const hsm = hsmRes.data as
     | {
         comps: Array<{
@@ -624,6 +664,114 @@ export default async function PlayerPage({
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {combine && (
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-lg font-semibold">Combine</h2>
+            <div className="text-xs text-zinc-500">
+              {combine.combine_season ? `${combine.combine_season} · ` : ""}
+              {combine.metrics_count ?? 0} metric
+              {(combine.metrics_count ?? 0) === 1 ? "" : "s"}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-3">
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Athleticism
+              </div>
+              <div
+                className={`text-2xl tabular-nums mt-1 ${rasColorClass(
+                  combine.athleticism_score !== null
+                    ? Number(combine.athleticism_score)
+                    : null,
+                )}`}
+              >
+                {combine.athleticism_score !== null
+                  ? Number(combine.athleticism_score).toFixed(1)
+                  : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">RAS-style 0–10</div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Height / Weight
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {formatHeight(
+                  combine.height_in !== null ? Number(combine.height_in) : null,
+                )}
+                {combine.weight_lb !== null && (
+                  <span className="text-zinc-400 text-base font-normal">
+                    {" · "}
+                    {Math.round(Number(combine.weight_lb))} lb
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                40-yd Dash
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.forty !== null ? Number(combine.forty).toFixed(2) : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">seconds</div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Vertical
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.vertical !== null
+                  ? `${Number(combine.vertical).toFixed(1)}"`
+                  : "—"}
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Broad Jump
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.broad_jump !== null
+                  ? `${Math.round(Number(combine.broad_jump))}"`
+                  : "—"}
+              </div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                3-Cone
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.cone !== null
+                  ? Number(combine.cone).toFixed(2)
+                  : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">seconds</div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                20-yd Shuttle
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.shuttle !== null
+                  ? Number(combine.shuttle).toFixed(2)
+                  : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">seconds</div>
+            </div>
+            <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+              <div className="text-xs uppercase tracking-wider text-zinc-500">
+                Bench
+              </div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {combine.bench !== null ? `${combine.bench}` : "—"}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">225 lb reps</div>
+            </div>
           </div>
         </div>
       )}
