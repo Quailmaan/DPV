@@ -197,8 +197,8 @@ export default async function ProspectPage({
               Raw grades before cross-source normalization
             </div>
           </div>
-          <div className="overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+            <table className="w-full text-sm min-w-[420px]">
               <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
                 <tr>
                   <th className="px-3 py-2 text-left">Source</th>

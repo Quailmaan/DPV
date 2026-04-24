@@ -31,11 +31,17 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
         <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-            <Link href="/" className="font-semibold tracking-tight text-lg">
-              DPV <span className="text-zinc-400 font-normal">/ Dynasty Values</span>
+          <div className="mx-auto max-w-6xl px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3 flex-wrap">
+            <Link href="/" className="font-semibold tracking-tight text-lg whitespace-nowrap">
+              DPV{" "}
+              <span className="text-zinc-400 font-normal hidden sm:inline">
+                / Dynasty Values
+              </span>
             </Link>
-            <nav className="flex gap-5 text-sm text-zinc-600 dark:text-zinc-400">
+            {/* Nav scrolls horizontally if it overflows on narrow phones rather
+                than wrapping below the brand. -mx keeps the scroll edge flush
+                with the screen edge so swipe affordance is clearer. */}
+            <nav className="flex gap-4 sm:gap-5 text-sm text-zinc-600 dark:text-zinc-400 overflow-x-auto whitespace-nowrap -mx-3 px-3 sm:mx-0 sm:px-0">
               <Link
                 href="/"
                 className="hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -69,7 +75,7 @@ export default function RootLayout({
             </nav>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl w-full px-6 py-8 flex-1">
+        <main className="mx-auto max-w-6xl w-full px-3 sm:px-6 py-6 sm:py-8 flex-1">
           {children}
         </main>
       </body>
