@@ -52,6 +52,122 @@ function formatHeight(inches: number | null): string {
   return `${ft}'${inch}"`;
 }
 
+// Plain-English situation read for the Pre-Draft DPV card. Replaces the
+// "what inputs feed the model" math copy with stuff a casual reader can use
+// to learn about the player: tier+position outlook, source consensus,
+// athletic note when noteworthy, and a landing-spot pointer. Returns short
+// sentences in display order.
+function situationLines(opts: {
+  position: string | null;
+  pickTier: "tier-1" | "tier-2" | "tier-3" | "tier-4" | null;
+  avgRank: number | null;
+  sourceCount: number | null;
+  combineForty: number | null;
+  landingTeam: string | null;
+}): string[] {
+  const lines: string[] = [];
+  const pos = (opts.position ?? "").toUpperCase();
+
+  // Outlook: what kind of fantasy asset does this tier+position usually
+  // turn into? Calibrated against historical hit rates (Round 1 WRs hit
+  // weekly-starter > 50%, Day 3 RBs/WRs hit < 15%, etc).
+  if (opts.pickTier === "tier-1") {
+    if (pos === "QB") {
+      lines.push(
+        "Top-of-class QB profile. Players with this capital and grade typically win starter jobs by Year 2 and anchor Superflex rosters for 5+ years when the development holds.",
+      );
+    } else if (pos === "RB") {
+      lines.push(
+        "Bell-cow archetype. Top-of-1st backs almost always step into early-down volume and goal-line equity from Week 1 — the highest immediate-impact tier in fantasy.",
+      );
+    } else if (pos === "WR") {
+      lines.push(
+        "Alpha-receiver track. Round 1 WRs at this grade hit weekly-starter status as rookies more than half the time, with 100+ target floors in clean situations.",
+      );
+    } else if (pos === "TE") {
+      lines.push(
+        "Rare top-of-class TE. Position scarcity makes him an outlier asset if the receiving role lands — TE1 finishes become realistic by Year 2.",
+      );
+    }
+  } else if (opts.pickTier === "tier-2") {
+    if (pos === "QB") {
+      lines.push(
+        "Late-1st / early-2nd QB profile — usually a one-year sit before the runway opens. Patient Superflex stash with real starter equity once the team commits.",
+      );
+    } else if (pos === "RB") {
+      lines.push(
+        "Multi-year RB asset. Day 1 / early-Day 2 backs project into rotational starter roles with paths to lead duties if the depth chart turns over.",
+      );
+    } else if (pos === "WR") {
+      lines.push(
+        "Solid WR2/3 archetype. Year-1 role tracks the depth chart, but the 3-year arc usually lands at weekly-starter in a clean target tree.",
+      );
+    } else if (pos === "TE") {
+      lines.push(
+        "Day-2 TE bet. Most break out in Year 2-3 rather than as rookies — patience required, but the position-scarcity payoff is real.",
+      );
+    }
+  } else if (opts.pickTier === "tier-3") {
+    lines.push(
+      "Late-Day 2 / early-Day 3 tier. Realistic Year-1 role is rotational at best — the fantasy hit usually needs an injury or trade ahead of him. Best treated as a depth / upside stash.",
+    );
+  } else if (opts.pickTier === "tier-4") {
+    lines.push(
+      "Day-3 dart throw. Fantasy hit rates at this capital fall under 15% historically — worth a roster spot only in deep leagues or as a contingent handcuff with the right landing spot.",
+    );
+  }
+
+  // Source consensus — useful context for "is this guy a slam-dunk or
+  // polarizing?" Only fire when we have enough boards to say something.
+  if (
+    opts.avgRank !== null &&
+    opts.sourceCount !== null &&
+    opts.sourceCount >= 2
+  ) {
+    if (opts.avgRank <= 5) {
+      lines.push(
+        `Top-5 across ${opts.sourceCount} major boards — near-zero disagreement on him as a top-of-class talent.`,
+      );
+    } else if (opts.avgRank <= 15) {
+      lines.push(
+        `Top-15 consensus across ${opts.sourceCount} sources — clear Round 1 grade with limited spread.`,
+      );
+    }
+  }
+
+  // Athleticism — only mention when the 40 is actually noteworthy in
+  // either direction. Skip for QB (their 40 doesn't move fantasy outlook).
+  if (
+    opts.combineForty !== null &&
+    (pos === "WR" || pos === "RB" || pos === "TE")
+  ) {
+    if (opts.combineForty <= 4.4) {
+      lines.push(
+        `${opts.combineForty.toFixed(2)} forty backs the speed projection — translates to separation and big-play upside.`,
+      );
+    } else if (pos === "WR" && opts.combineForty >= 4.65) {
+      lines.push(
+        `${opts.combineForty.toFixed(2)} forty is on the slower end for a Round 1 WR — points more at a possession / route-tree profile than a vertical threat.`,
+      );
+    }
+  }
+
+  // Landing-spot pointer. Direct readers to the Landing Spot section
+  // below when team is known; otherwise set the expectation that team
+  // context will materially move the value once announced.
+  if (opts.landingTeam) {
+    lines.push(
+      `Drafted to ${opts.landingTeam} — see the Landing Spot section below for the depth-chart and team-context read.`,
+    );
+  } else {
+    lines.push(
+      "Landing spot will swing his Year-1 outlook materially. The Pre-Draft DPV refines the moment the team is announced.",
+    );
+  }
+
+  return lines;
+}
+
 export default async function ProspectPage({
   params,
   searchParams,
@@ -453,24 +569,30 @@ export default async function ProspectPage({
                 </span>
               </div>
             )}
-            <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-3 leading-snug">
-              {pickEquivalent ? (
-                <>
+            <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-3 leading-snug space-y-2">
+              {pickEquivalent && (
+                <p>
                   <span className="font-medium text-zinc-700 dark:text-zinc-300">
                     {pickEquivalent.descriptor}.
-                  </span>{" "}
-                </>
-              ) : null}
-              Built from {prospect.projected_round ? "projected round" : "consensus grade"}
-              , athleticism, and{" "}
-              {landingTeam ? `${landingTeam}'s offensive context` : "landing-spot context"}
-              . A Round 1 selection roughly holds this value; sliding to Day 3
-              cuts it 30–50%.{" "}
-              <Link href="/trade" className="underline">
-                Plug into the trade calculator
-              </Link>{" "}
-              to test offers — refines to a true rookie-prior DPV within 1–3
-              days of the draft.
+                  </span>
+                </p>
+              )}
+              {situationLines({
+                position: prospect.position,
+                pickTier: pickEquivalent?.tier ?? null,
+                avgRank,
+                sourceCount: prospect.source_count ?? null,
+                combineForty: combine?.forty ?? null,
+                landingTeam,
+              }).map((line, i) => (
+                <p key={i}>{line}</p>
+              ))}
+              <p>
+                <Link href="/trade" className="underline">
+                  Plug into the trade calculator
+                </Link>{" "}
+                to test offers against the rest of your roster.
+              </p>
             </div>
           </div>
           <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
