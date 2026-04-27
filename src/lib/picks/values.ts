@@ -51,6 +51,12 @@ export function generatePickPlayers(
         team: String(year),
         age: null,
         dpv,
+        // Sub-option C: assume market broadly agrees with our pick model.
+        // Picks therefore contribute equally to both the DPV and Market axes
+        // and never trigger a Buy/Sell flag on the trade calculator.
+        market: dpv,
+        hasMarket: false,
+        marketDelta: null,
         tier: `${baseTier}${classSuffix}`,
       });
     }

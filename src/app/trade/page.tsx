@@ -62,16 +62,51 @@ export default async function TradePage({
     }));
   }
 
-  const { data } = await sb
-    .from("dpv_snapshots")
-    .select(
-      "dpv, tier, player_id, players(name, position, current_team, birthdate)",
-    )
-    .eq("scoring_format", fmt)
-    .order("dpv", { ascending: false });
+  const [{ data }, { data: marketData }] = await Promise.all([
+    sb
+      .from("dpv_snapshots")
+      .select(
+        "dpv, tier, player_id, players(name, position, current_team, birthdate)",
+      )
+      .eq("scoring_format", fmt)
+      .order("dpv", { ascending: false }),
+    // FantasyCalc market values for the same format. Used for the second
+    // axis of the trade verdict (production vs. price) and for per-player
+    // Buy/Sell badges.
+    sb
+      .from("market_values")
+      .select("player_id, market_value_normalized")
+      .eq("scoring_format", fmt)
+      .eq("source", "fantasycalc"),
+  ]);
+
+  // Build a player_id → market value map. Market and DPV use different
+  // absolute scales (FantasyCalc vs our 0-10k DPV), so we don't compare
+  // raw values across systems — we compare *position ranks* within the
+  // intersection of players who have both. Below we compute, per position,
+  // each player's DPV rank and Market rank within that intersection.
+  const marketMap = new Map<string, number>();
+  for (const m of marketData ?? []) {
+    const v = m.market_value_normalized;
+    if (v !== null && v !== undefined) {
+      marketMap.set(m.player_id, Number(v));
+    }
+  }
 
   const now = Date.now();
-  const nflPlayers: TradePlayer[] = (data ?? [])
+
+  // First pass: build raw rows so we can compute per-position ranks.
+  type Pre = {
+    id: string;
+    name: string;
+    position: string;
+    team: string | null;
+    birthdate: string | null;
+    dpv: number;
+    market: number | null;
+    tier: string;
+  };
+  const pre: Pre[] = (data ?? [])
     .filter((r) => r.players)
     .map((r) => {
       const p = r.players as unknown as {
@@ -80,20 +115,62 @@ export default async function TradePage({
         current_team: string | null;
         birthdate: string | null;
       };
-      const age = p.birthdate
-        ? (now - new Date(p.birthdate).getTime()) /
-          (365.25 * 24 * 3600 * 1000)
-        : null;
       return {
         id: r.player_id,
         name: p.name,
         position: p.position,
         team: p.current_team ?? null,
-        age: age !== null ? Number(age.toFixed(1)) : null,
+        birthdate: p.birthdate,
         dpv: r.dpv,
+        market: marketMap.get(r.player_id) ?? null,
         tier: r.tier,
       };
     });
+
+  // Per-position rank deltas — only meaningful within the intersection of
+  // players that have BOTH a DPV and a market value. A 5-rank gap at WR
+  // means more than at TE because positions have different depths.
+  const deltaById = new Map<string, number>();
+  const positions = Array.from(new Set(pre.map((p) => p.position)));
+  for (const pos of positions) {
+    const inPos = pre.filter((p) => p.position === pos && p.market !== null);
+    const dpvSorted = [...inPos].sort((a, b) => b.dpv - a.dpv);
+    const mktSorted = [...inPos].sort(
+      (a, b) => (b.market ?? 0) - (a.market ?? 0),
+    );
+    const dpvRank = new Map(dpvSorted.map((p, i) => [p.id, i + 1]));
+    const mktRank = new Map(mktSorted.map((p, i) => [p.id, i + 1]));
+    for (const p of inPos) {
+      const dr = dpvRank.get(p.id);
+      const mr = mktRank.get(p.id);
+      if (dr === undefined || mr === undefined) continue;
+      // Positive delta = DPV ranks higher (lower number) than market = Buy.
+      deltaById.set(p.id, mr - dr);
+    }
+  }
+
+  const nflPlayers: TradePlayer[] = pre.map((p) => {
+    const age = p.birthdate
+      ? (now - new Date(p.birthdate).getTime()) /
+        (365.25 * 24 * 3600 * 1000)
+      : null;
+    const hasMarket = p.market !== null;
+    return {
+      id: p.id,
+      name: p.name,
+      position: p.position,
+      team: p.team,
+      age: age !== null ? Number(age.toFixed(1)) : null,
+      dpv: p.dpv,
+      // Fall back to DPV when no market price exists so sums stay sane.
+      // The hasMarket flag tells the verdict math whether this player
+      // contributes a real disagreement signal vs. a no-op fallback.
+      market: p.market ?? p.dpv,
+      hasMarket,
+      marketDelta: deltaById.get(p.id) ?? null,
+      tier: p.tier,
+    };
+  });
 
   // Pull per-year class depth signal (Phase 3). pickDpv uses these counts
   // to shape the pick curve slot-by-slot; years with no row default to

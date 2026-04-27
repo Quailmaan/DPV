@@ -11,6 +11,21 @@ export type TradePlayer = {
   team: string | null;
   age: number | null;
   dpv: number;
+  /**
+   * Player's market value in the same scoring format. Falls back to `dpv`
+   * when no market data exists (deep depth, picks per sub-option C) so
+   * sums on the market axis don't crater. `hasMarket` distinguishes real
+   * data from the fallback.
+   */
+  market: number;
+  hasMarket: boolean;
+  /**
+   * Position-rank delta: marketRank − dpvRank within the (DPV ∩ Market)
+   * intersection at the player's position. Positive = DPV ranks higher
+   * than market (Buy signal); negative = market ranks higher (Sell). Null
+   * when the player isn't in the intersection (no market, or picks).
+   */
+  marketDelta: number | null;
   tier: string;
 };
 
@@ -42,18 +57,37 @@ function valueAboveReplacement(p: TradePlayer): number {
   return Math.max(0, p.dpv - repl);
 }
 
+// Per-player buy/sell flag from rank delta. A 5-rank gap inside a position
+// is enough to be more than noise; below that we treat the player as
+// market-aligned and don't show a badge.
+function buySellBadge(
+  delta: number | null,
+): { label: string; tone: "buy" | "sell" } | null {
+  if (delta === null) return null;
+  if (delta >= 5) return { label: "BUY", tone: "buy" };
+  if (delta <= -5) return { label: "SELL", tone: "sell" };
+  return null;
+}
+
+const BUY_SELL_CLASS: Record<"buy" | "sell", string> = {
+  buy: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
+  sell: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+};
+
 function sideValue(side: TradePlayer[]): {
   dpv: number;
+  market: number;
   var_: number;
   avgAge: number | null;
 } {
   const dpv = side.reduce((a, b) => a + b.dpv, 0);
+  const market = side.reduce((a, b) => a + b.market, 0);
   const var_ = side.reduce((a, b) => a + valueAboveReplacement(b), 0);
   const ages = side.map((p) => p.age).filter((x): x is number => x !== null);
   const avgAge = ages.length
     ? ages.reduce((a, b) => a + b, 0) / ages.length
     : null;
-  return { dpv, var_, avgAge };
+  return { dpv, market, var_, avgAge };
 }
 
 type Verdict = {
@@ -61,7 +95,32 @@ type Verdict = {
   flavor: string;
   explanation: string;
   tone: "win_big" | "win" | "fair" | "loss" | "loss_big";
+  /** Δ on the production axis (DPV-driven). Positive = you win on DPV. */
+  dpvPct: number;
+  /** Δ on the price axis (market-driven). Positive = market thinks you won. */
+  marketPct: number;
 };
+
+// Threshold between "neutral" and "matters" for each axis. Anything inside
+// ±10% reads as "rough wash" on that axis; outside it counts as a real lean.
+const POS = 0.1;
+// Strong move that triggers Steal/Disaster instead of Solid Win/Lean Reject.
+const STRONG = 0.2;
+
+function classify(pct: number): "pos" | "neutral" | "neg" {
+  if (pct > POS) return "pos";
+  if (pct < -POS) return "neg";
+  return "neutral";
+}
+
+function ageNoteFor(g: ReturnType<typeof sideValue>, r: ReturnType<typeof sideValue>): string {
+  const ageDelta =
+    g.avgAge !== null && r.avgAge !== null ? r.avgAge - g.avgAge : 0;
+  if (Math.abs(ageDelta) < 1.5) return "";
+  return ageDelta > 0
+    ? ` Your return is ${ageDelta.toFixed(1)} yrs older on average — factor in dynasty shelf life.`
+    : ` Your return is ${(-ageDelta).toFixed(1)} yrs younger on average — small long-term boost.`;
+}
 
 function verdictFor(
   giving: TradePlayer[],
@@ -71,60 +130,159 @@ function verdictFor(
   const g = sideValue(giving);
   const r = sideValue(getting);
 
-  // Base the verdict on raw DPV — it already includes positional scarcity
-  // via the scarcity tier modifier. Layering a hard VAR floor on top
-  // double-penalized mid-tier players whose DPV sat below replacement.
-  const denom = Math.max(g.dpv, r.dpv, 1);
-  const pct = (r.dpv - g.dpv) / denom;
+  // Symmetric percent diff so a 7,000 → 8,000 swing reads the same on both
+  // axes regardless of absolute scale (DPV vs FantasyCalc are different
+  // ranges). Each axis gets its own pct so they're directly comparable.
+  const dpvDenom = Math.max(g.dpv, r.dpv, 1);
+  const dpvPct = (r.dpv - g.dpv) / dpvDenom;
 
-  const ageDelta =
-    g.avgAge !== null && r.avgAge !== null ? r.avgAge - g.avgAge : 0;
-  const ageNote =
-    Math.abs(ageDelta) >= 1.5
-      ? ageDelta > 0
-        ? ` Your return is ${ageDelta.toFixed(1)} yrs older on average — factor in dynasty shelf life.`
-        : ` Your return is ${(-ageDelta).toFixed(1)} yrs younger on average — small long-term boost.`
-      : "";
+  const mktDenom = Math.max(g.market, r.market, 1);
+  const marketPct = (r.market - g.market) / mktDenom;
 
-  if (pct >= 0.25) {
-    return {
-      label: "Subway King Trade",
-      flavor:
-        "\"Dang ol' footlong, man, I tell you what.\" You're walking out with way more than you gave up.",
-      explanation: `You gain ${Math.round(pct * 100)}% more DPV than you give up. Accept before they notice.${ageNote}`,
-      tone: "win_big",
-    };
-  }
-  if (pct >= 0.1) {
+  const ageNote = ageNoteFor(g, r);
+
+  // 3×3 verdict matrix — DPV (production) × Market (price). The cells
+  // disagree are the *most valuable* ones: Buy-Low and Sell-High flag
+  // mispricings, exactly the trades worth making in dynasty.
+  const dpvCls = classify(dpvPct);
+  const mktCls = classify(marketPct);
+
+  const dpvPctRound = Math.round(dpvPct * 100);
+  const mktPctRound = Math.round(marketPct * 100);
+  const fmtPct = (n: number) => (n > 0 ? `+${n}%` : `${n}%`);
+
+  // ── Both axes positive: pure win ──────────────────────────────
+  if (dpvCls === "pos" && mktCls === "pos") {
+    if (dpvPct >= STRONG || marketPct >= STRONG) {
+      return {
+        label: "Subway King Steal",
+        flavor:
+          "\"Dang ol' footlong, man, I tell you what.\" Both axes confirm you robbed them.",
+        explanation: `Production ${fmtPct(dpvPctRound)} and market ${fmtPct(mktPctRound)} in your favor. Accept before they notice.${ageNote}`,
+        tone: "win_big",
+        dpvPct,
+        marketPct,
+      };
+    }
     return {
       label: "Solid Win",
-      flavor: "Clear lean in your favor.",
-      explanation: `You come out ${Math.round(pct * 100)}% ahead on total DPV.${ageNote}`,
+      flavor: "Both production and market lean your way.",
+      explanation: `DPV ${fmtPct(dpvPctRound)}, market ${fmtPct(mktPctRound)}. Real value gain, fairly priced trade.${ageNote}`,
       tone: "win",
+      dpvPct,
+      marketPct,
     };
   }
-  if (pct > -0.1) {
+
+  // ── Production wins, market disagrees: BUY-LOW (the prized signal) ──
+  if (dpvCls === "pos" && mktCls === "neg") {
+    return {
+      label: "Buy-Low Steal",
+      flavor:
+        "DPV sees real value the market hasn't priced in. Print this trade.",
+      explanation: `Model says you gain ${fmtPct(dpvPctRound)} of production, but market would call this ${fmtPct(mktPctRound)} against you — meaning the league at large would view it close to fair, possibly even in their favor. The disagreement IS the alpha.${ageNote}`,
+      tone: "win",
+      dpvPct,
+      marketPct,
+    };
+  }
+
+  // ── Production wins, market agrees lightly ────────────────────
+  if (dpvCls === "pos" && mktCls === "neutral") {
+    return {
+      label: "Solid Win",
+      flavor: "Production gain at a fair-market price.",
+      explanation: `DPV ${fmtPct(dpvPctRound)} in your favor; market reads roughly even (${fmtPct(mktPctRound)}). Clean win.${ageNote}`,
+      tone: "win",
+      dpvPct,
+      marketPct,
+    };
+  }
+
+  // ── Production neutral, market wins: SELL-HIGH ────────────────
+  if (dpvCls === "neutral" && mktCls === "pos") {
+    return {
+      label: "Sell-High",
+      flavor:
+        "Production unchanged but the market thinks you cleaned them out.",
+      explanation: `DPV reads roughly even (${fmtPct(dpvPctRound)}) but you gain ${fmtPct(mktPctRound)} of market value — you're cashing in on hype before it cools. Solid take.${ageNote}`,
+      tone: "win",
+      dpvPct,
+      marketPct,
+    };
+  }
+
+  // ── Both axes neutral: fair trade ─────────────────────────────
+  if (dpvCls === "neutral" && mktCls === "neutral") {
     return {
       label: "Fair Trade",
-      flavor: "Roughly balanced — depends on your roster needs.",
-      explanation: `Within ${Math.round(Math.abs(pct) * 100)}% either way on value. If this fills a hole or consolidates roster spots, take it.${ageNote}`,
+      flavor: "Roughly balanced on both axes — comes down to roster fit.",
+      explanation: `DPV within ${Math.abs(dpvPctRound)}% and market within ${Math.abs(mktPctRound)}%. If this fills a hole or consolidates roster spots, take it.${ageNote}`,
       tone: "fair",
+      dpvPct,
+      marketPct,
     };
   }
-  if (pct > -0.25) {
+
+  // ── Production neutral, market dings you: HIDDEN VALUE ────────
+  if (dpvCls === "neutral" && mktCls === "neg") {
+    return {
+      label: "Hidden Value",
+      flavor: "DPV stays even but market thinks you lost slightly.",
+      explanation: `Production roughly unchanged (${fmtPct(dpvPctRound)}); market trails you ${fmtPct(mktPctRound)}. You see something the league doesn't — defensible if your roster needs the swap.${ageNote}`,
+      tone: "fair",
+      dpvPct,
+      marketPct,
+    };
+  }
+
+  // ── Production loses, market agrees lightly: lean reject ──────
+  if (dpvCls === "neg" && mktCls === "neutral") {
     return {
       label: "Lean Reject",
-      flavor: "Tilted against you.",
-      explanation: `You lose ${Math.round(-pct * 100)}% of value. Ask for a throw-in or pass.${ageNote}`,
+      flavor: "Production loss without market compensation.",
+      explanation: `DPV ${fmtPct(dpvPctRound)} against you, market reads even (${fmtPct(mktPctRound)}). Ask for a throw-in or pass.${ageNote}`,
       tone: "loss",
+      dpvPct,
+      marketPct,
+    };
+  }
+
+  // ── Production loses, market wins: CALCULATED SELL-HIGH ───────
+  // This is a real cash-out — you take a small production hit in exchange
+  // for a big market gain. Defensible if you can replace the lost points
+  // off the wire and need the future asset.
+  if (dpvCls === "neg" && mktCls === "pos") {
+    return {
+      label: "Calculated Sell-High",
+      flavor:
+        "Slight production loss but big market gain. Hype-sell if you can replace the points.",
+      explanation: `DPV ${fmtPct(dpvPctRound)} against you; market ${fmtPct(mktPctRound)} in your favor. The league overpays for the brand — only take it if you have a plug-in replacement on the wire or in your league.${ageNote}`,
+      tone: "fair",
+      dpvPct,
+      marketPct,
+    };
+  }
+
+  // ── Both axes negative: disaster ──────────────────────────────
+  if (dpvPct <= -STRONG && marketPct <= -STRONG) {
+    return {
+      label: "Bobby Hill Trade",
+      flavor:
+        "\"Son, that dog won't hunt.\" Losing on both axes — pure giveaway.",
+      explanation: `Production ${fmtPct(dpvPctRound)} AND market ${fmtPct(mktPctRound)} against you. Walk away and don't look back.${ageNote}`,
+      tone: "loss_big",
+      dpvPct,
+      marketPct,
     };
   }
   return {
-    label: "Bobby Hill Trade",
-    flavor:
-      "\"Son, that dog won't hunt.\" This is lopsided against you — pure giveaway.",
-    explanation: `You're giving up ${Math.round(-pct * 100)}% more value than you're getting back. Walk away and don't look back.${ageNote}`,
-    tone: "loss_big",
+    label: "Lean Reject",
+    flavor: "Both production and market tilt against you.",
+    explanation: `DPV ${fmtPct(dpvPctRound)} and market ${fmtPct(mktPctRound)} against you. Pass.${ageNote}`,
+    tone: "loss",
+    dpvPct,
+    marketPct,
   };
 }
 
@@ -257,7 +415,13 @@ export default function TradeCalculator({
       </div>
 
       {verdict && (
-        <VerdictCard verdict={verdict} giving={g} getting={r} />
+        <VerdictCard
+          verdict={verdict}
+          giving={g}
+          getting={r}
+          givingHasMarket={giving.some((p) => p.hasMarket)}
+          gettingHasMarket={getting.some((p) => p.hasMarket)}
+        />
       )}
     </>
   );
@@ -400,6 +564,16 @@ function TradeSide({
                       {p.team ?? "—"}
                     </span>
                   )}
+                  {(() => {
+                    const b = buySellBadge(p.marketDelta);
+                    return b ? (
+                      <span
+                        className={`text-[10px] font-bold tracking-wider px-1 py-0.5 rounded ${BUY_SELL_CLASS[b.tone]}`}
+                      >
+                        {b.label}
+                      </span>
+                    ) : null;
+                  })()}
                 </span>
                 <span className="tabular-nums font-semibold">{p.dpv}</span>
               </button>
@@ -446,6 +620,21 @@ function TradeSide({
                     {p.team ?? "—"} · {p.age ?? "—"}
                   </span>
                 )}
+                {(() => {
+                  const b = buySellBadge(p.marketDelta);
+                  return b ? (
+                    <span
+                      className={`text-[10px] font-bold tracking-wider px-1 py-0.5 rounded flex-shrink-0 ${BUY_SELL_CLASS[b.tone]}`}
+                      title={
+                        b.tone === "buy"
+                          ? "DPV ranks this player higher than the market"
+                          : "Market ranks this player higher than DPV"
+                      }
+                    >
+                      {b.label}
+                    </span>
+                  ) : null;
+                })()}
               </div>
               <div className="flex items-center gap-3 flex-shrink-0">
                 <span className="tabular-nums font-semibold">{p.dpv}</span>
@@ -473,10 +662,14 @@ function VerdictCard({
   verdict,
   giving,
   getting,
+  givingHasMarket,
+  gettingHasMarket,
 }: {
   verdict: Verdict;
-  giving: { dpv: number; var_: number };
-  getting: { dpv: number; var_: number };
+  giving: { dpv: number; market: number; var_: number };
+  getting: { dpv: number; market: number; var_: number };
+  givingHasMarket: boolean;
+  gettingHasMarket: boolean;
 }) {
   const toneClasses: Record<Verdict["tone"], string> = {
     win_big:
@@ -488,22 +681,85 @@ function VerdictCard({
       "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100",
   };
 
+  // Only render the market axis line if at least one side actually has any
+  // FantasyCalc-priced players. Picks-only or unranked-rookie-only trades
+  // would show market = dpv on both sides (sub-option C fallback) which is
+  // misleading.
+  const showMarketAxis = givingHasMarket || gettingHasMarket;
+
+  const dpvDelta = getting.dpv - giving.dpv;
+  const mktDelta = getting.market - giving.market;
+  const fmtDelta = (n: number) =>
+    n > 0 ? `+${Math.round(n)}` : `${Math.round(n)}`;
+  const fmtPct = (n: number) =>
+    n > 0 ? `+${Math.round(n * 100)}%` : `${Math.round(n * 100)}%`;
+
+  // Color the per-axis pct so the user can see at a glance which axis is
+  // pulling the verdict which way. Independent from the overall card tone.
+  const pctColor = (pct: number) =>
+    pct > 0.05
+      ? "text-emerald-700 dark:text-emerald-300"
+      : pct < -0.05
+        ? "text-rose-700 dark:text-rose-300"
+        : "text-zinc-500";
+
   return (
-    <div
-      className={`rounded-md border-2 p-5 ${toneClasses[verdict.tone]}`}
-    >
+    <div className={`rounded-md border-2 p-5 ${toneClasses[verdict.tone]}`}>
       <div className="flex items-baseline justify-between flex-wrap gap-3 mb-2">
         <div className="text-2xl font-bold tracking-tight">
           {verdict.label}
         </div>
-        <div className="text-sm tabular-nums opacity-80">
-          Giving {giving.dpv} · Getting {getting.dpv} · Δ{" "}
-          {getting.dpv - giving.dpv > 0
-            ? `+${getting.dpv - giving.dpv}`
-            : getting.dpv - giving.dpv}
+        <div className="text-xs uppercase tracking-wider opacity-70">
+          Two-axis verdict
         </div>
       </div>
-      <div className="text-sm italic mb-2 opacity-90">{verdict.flavor}</div>
+      <div className="text-sm italic mb-3 opacity-90">{verdict.flavor}</div>
+
+      <div className="rounded-md bg-white/60 dark:bg-zinc-950/40 border border-current/10 p-3 mb-3 text-sm tabular-nums">
+        <div className="grid grid-cols-[auto_1fr_1fr_auto] gap-x-4 gap-y-1 items-baseline">
+          <div className="text-xs uppercase tracking-wider opacity-60">
+            Axis
+          </div>
+          <div className="text-xs uppercase tracking-wider opacity-60">
+            Giving
+          </div>
+          <div className="text-xs uppercase tracking-wider opacity-60">
+            Getting
+          </div>
+          <div className="text-xs uppercase tracking-wider opacity-60 text-right">
+            Δ
+          </div>
+
+          <div className="font-medium">DPV (production)</div>
+          <div>{Math.round(giving.dpv).toLocaleString()}</div>
+          <div>{Math.round(getting.dpv).toLocaleString()}</div>
+          <div className={`text-right font-semibold ${pctColor(verdict.dpvPct)}`}>
+            {fmtDelta(dpvDelta)} · {fmtPct(verdict.dpvPct)}
+          </div>
+
+          {showMarketAxis ? (
+            <>
+              <div className="font-medium">Market (price)</div>
+              <div>{Math.round(giving.market).toLocaleString()}</div>
+              <div>{Math.round(getting.market).toLocaleString()}</div>
+              <div
+                className={`text-right font-semibold ${pctColor(verdict.marketPct)}`}
+              >
+                {fmtDelta(mktDelta)} · {fmtPct(verdict.marketPct)}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="font-medium opacity-60">Market (price)</div>
+              <div className="opacity-60 col-span-3 italic text-xs">
+                No FantasyCalc data on either side (picks or unranked rookies
+                only) — falling back to DPV verdict.
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       <div className="text-sm">{verdict.explanation}</div>
     </div>
   );
