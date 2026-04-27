@@ -8,9 +8,11 @@ import {
   fetchCombineDataset,
   normalizeCombineName,
 } from "@/lib/combine/csv";
+import { sfQbMult } from "@/lib/dpv/rookie-prior";
 import {
   computeRookieTradeValue,
   roundFromOverallPick,
+  rookiePickEquivalent,
 } from "@/lib/rookies/values";
 
 // /rookies — current draft class view. Shows prospect consensus rankings
@@ -28,7 +30,7 @@ import {
 
 const INCOMING_CLASS_YEAR = CURRENT_SEASON + 1;
 
-type SearchParams = Promise<{ fmt?: string; pos?: string }>;
+type SearchParams = Promise<{ fmt?: string; pos?: string; sf?: string }>;
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: "STANDARD", label: "Standard" },
@@ -61,6 +63,10 @@ export default async function RookiesPage({
   const sp = await searchParams;
   const fmt: ScoringFormat = isScoringFormat(sp.fmt) ? sp.fmt : "HALF_PPR";
   const pos = (sp.pos || "ALL").toUpperCase();
+  // Superflex toggle. Off by default (1-QB calibration matches mainstream
+  // dynasty). When on, the rookie prior re-inflates QB DPV via SF_QB_MULT
+  // — so QBs leapfrog skill positions, as they should in SF/2-QB leagues.
+  const superflex = sp.sf === "1";
 
   const sb = createServerClient();
   // Pull all the data we need in parallel:
@@ -342,6 +348,9 @@ export default async function RookiesPage({
               team,
               teamContext: teamCtx,
               scoringFormat: fmt,
+              // SF flag intentionally NOT passed here — applied uniformly
+              // post-loop via sfQbMult so snapshot-driven and synth rows
+              // both reflect Superflex equally.
             })
           : null;
         if (synth) {
@@ -414,6 +423,17 @@ export default async function RookiesPage({
     });
   }
 
+  // Superflex post-loop adjustment. Applied uniformly to every QB row so
+  // snapshot-driven and synthetic rows both reflect SF — keeps the DPV
+  // ranking consistent regardless of where each row's value came from.
+  if (superflex) {
+    for (const r of rows) {
+      if (r.position !== "QB" || r.dpv === null) continue;
+      const round = r.draftRound ?? r.projectedRound ?? null;
+      r.dpv = Math.round(r.dpv * sfQbMult(round));
+    }
+  }
+
   // Filter + sort. Drafted rookies float above undrafted via the sort key.
   const filtered = rows.filter((r) =>
     pos === "ALL" ? true : r.position === pos,
@@ -437,11 +457,32 @@ export default async function RookiesPage({
     return a.name.localeCompare(b.name);
   });
 
-  const buildHref = (updates: Partial<{ fmt: string; pos: string }>) => {
+  // Rookie-pick equivalent: rank every row in the *full* (unfiltered) list
+  // by DPV descending, then compute the pick coordinate per row. Computed
+  // off the unfiltered set so a position filter doesn't change the pick
+  // each rookie maps to (a position-filtered #1 is still 1.05 if there are
+  // 4 better non-QBs sitting above him class-wide).
+  const pickByKey = new Map<string, ReturnType<typeof rookiePickEquivalent>>();
+  const dpvRanked = rows
+    .filter((r) => r.dpv !== null)
+    .sort((a, b) => (b.dpv ?? 0) - (a.dpv ?? 0));
+  dpvRanked.forEach((r, i) => {
+    pickByKey.set(r.key, rookiePickEquivalent(i + 1, 12));
+  });
+
+  const buildHref = (
+    updates: Partial<{ fmt: string; pos: string; sf: string }>,
+  ) => {
     const params = new URLSearchParams();
-    const next = { fmt, pos, ...updates };
+    const next = {
+      fmt,
+      pos,
+      sf: superflex ? "1" : "",
+      ...updates,
+    };
     if (next.fmt !== "HALF_PPR") params.set("fmt", next.fmt);
     if (next.pos && next.pos !== "ALL") params.set("pos", next.pos);
+    if (next.sf === "1") params.set("sf", "1");
     const s = params.toString();
     return s ? `/rookies?${s}` : "/rookies";
   };
@@ -504,6 +545,33 @@ export default async function RookiesPage({
             </Link>
           ))}
         </div>
+        {/* Superflex / 2-QB toggle. Off by default — most dynasty leagues are
+            1-QB. When on, rookie QBs leapfrog skill positions in the ranking
+            because QB scarcity inverts in SF formats. */}
+        <div className="flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-sm">
+          <Link
+            href={buildHref({ sf: "" })}
+            title="1-QB leagues — only the dedicated QB slot. Default."
+            className={`px-3 py-1.5 ${
+              !superflex
+                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            }`}
+          >
+            1-QB
+          </Link>
+          <Link
+            href={buildHref({ sf: "1" })}
+            title="Superflex / 2-QB leagues — re-inflates rookie QB DPV."
+            className={`px-3 py-1.5 ${
+              superflex
+                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            }`}
+          >
+            Superflex
+          </Link>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -514,7 +582,7 @@ export default async function RookiesPage({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          <table className="w-full text-sm min-w-[860px]">
+          <table className="w-full text-sm min-w-[940px]">
             <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
               <tr>
                 <th className="px-3 py-2 text-left w-10">#</th>
@@ -526,6 +594,12 @@ export default async function RookiesPage({
                 <th className="px-3 py-2 text-right w-14">RAS</th>
                 <th className="px-3 py-2 text-right w-14">40</th>
                 <th className="px-3 py-2 text-right w-20">DPV</th>
+                <th
+                  className="px-3 py-2 text-center w-16"
+                  title="Equivalent pick in a 12-team rookie draft, ranked by DPV"
+                >
+                  Pick
+                </th>
                 <th className="px-3 py-2 text-right w-20">Mkt</th>
                 <th className="px-3 py-2 text-left w-36">Tier</th>
               </tr>
@@ -647,6 +721,29 @@ export default async function RookiesPage({
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-semibold">
                     {r.dpv !== null ? r.dpv : <span className="text-zinc-400 font-normal">—</span>}
+                  </td>
+                  <td className="px-3 py-2 text-center tabular-nums">
+                    {(() => {
+                      const pick = pickByKey.get(r.key);
+                      if (!pick)
+                        return <span className="text-zinc-400">—</span>;
+                      const toneClass =
+                        pick.tier === "tier-1"
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+                          : pick.tier === "tier-2"
+                          ? "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200"
+                          : pick.tier === "tier-3"
+                          ? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                          : "bg-zinc-50 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-500";
+                      return (
+                        <span
+                          title={pick.descriptor}
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${toneClass}`}
+                        >
+                          {pick.label}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-500">
                     {r.market !== null

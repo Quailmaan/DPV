@@ -8,7 +8,10 @@ import {
   type RookieValueInput,
 } from "@/lib/rookies/values";
 import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
-import { leagueReplacementDPV } from "@/lib/dpv/scarcity";
+import {
+  isSuperflexConstruction,
+  leagueReplacementDPV,
+} from "@/lib/dpv/scarcity";
 import TradeCalculator, {
   type TradePlayer,
   type LeagueRosterOption,
@@ -311,6 +314,10 @@ export default async function TradePage({
       team,
       teamContext: teamCtx,
       scoringFormat: fmt,
+      // Auto-detect Superflex from the league's roster_positions. SF/2-QB
+      // leagues need rookie QB DPV inflated to compete with skill positions
+      // — without this, Mendoza-tier QBs trade like a 2nd-rounder in SF.
+      superflex: isSuperflexConstruction(leagueRosterPositions),
     });
   }
   const synthRookies = generateRookieTradeEntries(rookieInputs);

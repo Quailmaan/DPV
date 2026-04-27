@@ -11,6 +11,7 @@ import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
 import {
   computeRookieTradeValue,
   roundFromOverallPick,
+  rookiePickEquivalent,
 } from "@/lib/rookies/values";
 
 // /prospect/[id] — pre-draft prospect detail. Shows what we know before
@@ -53,10 +54,14 @@ function formatHeight(inches: number | null): string {
 
 export default async function ProspectPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ sf?: string }>;
 }) {
   const { id } = await params;
+  const sp = searchParams ? await searchParams : {};
+  const superflex = sp.sf === "1";
   const sb = createServerClient();
 
   const [consensusRes, sourcesRes] = await Promise.all([
@@ -260,8 +265,68 @@ export default async function ProspectPage({
       // mirror that here so the number on this page matches the search row
       // a user just clicked through from.
       scoringFormat: "HALF_PPR",
+      superflex,
     });
     if (synth) synthDPV = { dpv: synth.dpv, tier: synth.tier };
+  }
+
+  // Rookie-pick equivalent. Rank this prospect against the rest of the
+  // class by synthetic DPV, then translate to a "1.02"-style pick coordinate
+  // for the new card descriptor. Computed in SF or 1-QB mode to match the
+  // displayed DPV. Skipped when this prospect's position is unsupported
+  // (kicker, defender) — rookiePickEquivalent has no meaning there.
+  let pickEquivalent: ReturnType<typeof rookiePickEquivalent> | null = null;
+  if (synthDPV) {
+    const { data: classProspects } = await sb
+      .from("prospect_consensus")
+      .select(
+        "prospect_id, name, position, normalized_grade, projected_round, projected_overall_pick",
+      )
+      .eq("draft_year", prospect.draft_year);
+
+    type ClassRow = {
+      prospect_id: string;
+      name: string;
+      position: string | null;
+      normalized_grade: number | null;
+      projected_round: number | null;
+      projected_overall_pick: number | null;
+    };
+    const dpvByProspect = new Map<string, number>();
+    for (const row of (classProspects ?? []) as ClassRow[]) {
+      if (!row.position) continue;
+      const round =
+        row.projected_round ?? roundFromOverallPick(row.projected_overall_pick);
+      const synth = computeRookieTradeValue({
+        prospect: {
+          prospectId: row.prospect_id,
+          name: row.name,
+          position: row.position,
+          projectedRound: round,
+          consensusGrade:
+            row.normalized_grade !== null ? Number(row.normalized_grade) : null,
+          ageAtDraft: null,
+          draftYear: prospect.draft_year,
+        },
+        // No team context for the ranking pass — we want a stable order
+        // independent of which landing-spot rows are populated. The current
+        // prospect's own DPV (used for display) does include team context.
+        team: null,
+        teamContext: null,
+        scoringFormat: "HALF_PPR",
+        superflex,
+      });
+      if (synth) dpvByProspect.set(row.prospect_id, synth.dpv);
+    }
+    // Replace this prospect's class-pass DPV with the team-context-aware one
+    // so the rank reflects the value the user is actually looking at.
+    dpvByProspect.set(prospect.prospect_id, synthDPV.dpv);
+
+    const ranked = Array.from(dpvByProspect.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([pid]) => pid);
+    const idx = ranked.indexOf(prospect.prospect_id);
+    if (idx >= 0) pickEquivalent = rookiePickEquivalent(idx + 1, 12);
   }
 
   const grade =
@@ -362,10 +427,13 @@ export default async function ProspectPage({
       {synthDPV && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <div className="rounded-md border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 p-5">
-            <div className="text-xs uppercase tracking-wider text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+            <div className="text-xs uppercase tracking-wider text-emerald-700 dark:text-emerald-300 flex items-center gap-2 flex-wrap">
               Pre-Draft DPV
               <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded">
                 Projected
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-1.5 py-0.5 rounded">
+                {superflex ? "Superflex" : "1-QB"}
               </span>
             </div>
             <div className="text-4xl font-bold tabular-nums mt-1 text-emerald-900 dark:text-emerald-100">
@@ -375,13 +443,34 @@ export default async function ProspectPage({
               {synthDPV.tier}
               {landingTeam ? ` · ${landingTeam}` : " · no team yet"}
             </div>
-            <div className="text-xs text-zinc-500 mt-2 leading-snug">
-              Same engine that prices this prospect in the{" "}
+            {pickEquivalent && (
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="inline-block rounded-md bg-emerald-600 dark:bg-emerald-500 text-white px-2 py-1 text-sm font-semibold tabular-nums">
+                  {pickEquivalent.label}
+                </span>
+                <span className="text-xs text-emerald-900/80 dark:text-emerald-200/80">
+                  Rookie-draft pick equivalent (12-team)
+                </span>
+              </div>
+            )}
+            <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-3 leading-snug">
+              {pickEquivalent ? (
+                <>
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                    {pickEquivalent.descriptor}.
+                  </span>{" "}
+                </>
+              ) : null}
+              Built from {prospect.projected_round ? "projected round" : "consensus grade"}
+              , athleticism, and{" "}
+              {landingTeam ? `${landingTeam}'s offensive context` : "landing-spot context"}
+              . A Round 1 selection roughly holds this value; sliding to Day 3
+              cuts it 30–50%.{" "}
               <Link href="/trade" className="underline">
-                trade calculator
-              </Link>
-              . Replaces with a real rookie-prior DPV once the player record
-              + draft capital land (typically 1-3 days post-draft).
+                Plug into the trade calculator
+              </Link>{" "}
+              to test offers — refines to a true rookie-prior DPV within 1–3
+              days of the draft.
             </div>
           </div>
           <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">

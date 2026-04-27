@@ -196,6 +196,26 @@ export function leagueReplacementDPV(
   return { replacement, teamCount, isDefault };
 }
 
+/**
+ * Detect a Superflex / 2-QB league from its roster_positions. Used to flip
+ * the rookie-prior QB scaling without making the caller hand-classify the
+ * league. Counts SUPER_FLEX (or QB_WR_RB_TE) and dedicated extra QB slots
+ * — anything with >1 expected starting QB per team is Superflex-equivalent
+ * for QB scarcity purposes.
+ */
+export function isSuperflexConstruction(
+  rosterPositions: readonly string[] | null | undefined,
+): boolean {
+  if (!rosterPositions || rosterPositions.length === 0) return false;
+  let qbStarters = 0;
+  for (const raw of rosterPositions) {
+    const slot = raw.toUpperCase();
+    if (slot === "QB") qbStarters += 1;
+    else if (slot === "SUPER_FLEX" || slot === "QB_WR_RB_TE") qbStarters += 1;
+  }
+  return qbStarters >= 2;
+}
+
 /** VAR = value above replacement. Negative-clamped — a deep-bench player
  *  contributes 0 to a side's VAR sum, not negative. */
 export function valueAboveReplacement(

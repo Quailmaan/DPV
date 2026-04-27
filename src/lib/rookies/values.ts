@@ -51,6 +51,9 @@ export type RookieValueInput = {
   /** Most-recent team_seasons row for `team`, or null. Drives OL/QB context. */
   teamContext: TeamContextInput | null;
   scoringFormat: ScoringFormat;
+  /** Superflex / 2-QB league flag. Defaults to false (1-QB calibration).
+   *  Re-inflates QB rookie DPV when the caller is pricing for a SF league. */
+  superflex?: boolean;
 };
 
 // Consensus-grade overlay. Within a given round, top-of-class prospects
@@ -113,6 +116,7 @@ export function computeRookieTradeValue(
     athleticismScore: null,
     hsmProjectedPPG: null,
     hsmN: 0,
+    superflex: input.superflex ?? false,
   });
 
   const gradeMult = consensusGradeMult(input.prospect.consensusGrade);
@@ -158,4 +162,74 @@ export function generateRookieTradeEntries(
   }
   out.sort((a, b) => b.dpv - a.dpv);
   return out;
+}
+
+// ── Rookie-draft pick equivalent ──────────────────────────────────────────
+//
+// Translate a rookie's DPV rank within the class into "this should go around
+// pick X.YY of your rookie draft." Self-calibrating — the labels stay sane
+// even if the rookie prior formula shifts later. Defaults to 12-team rookie
+// drafts (the standard dynasty format).
+//
+// The numeric `label` (e.g. "1.02") is the pick coordinate; the `descriptor`
+// is plain-English guidance ("Target at #1 overall", "Mid 1st", etc.) and
+// is what the UI surfaces when there's no room for the raw coordinate.
+
+export type RookiePickEquivalent = {
+  /** Class-relative rank, 1-based. */
+  rank: number;
+  /** Round of the rookie draft (1, 2, 3, …). */
+  round: number;
+  /** Slot within the round, 1-based. */
+  slot: number;
+  /** "1.02"-style coordinate. Always two-digit slot. */
+  label: string;
+  /** Plain-English guidance — the part the UI shows in tooltips/copy. */
+  descriptor: string;
+  /** "tier-1" through "tier-4" for color coding. tier-1 = top of 1st. */
+  tier: "tier-1" | "tier-2" | "tier-3" | "tier-4";
+};
+
+export function rookiePickEquivalent(
+  rank: number,
+  teams: number = 12,
+): RookiePickEquivalent {
+  const safeTeams = teams > 0 ? teams : 12;
+  const safeRank = Math.max(1, Math.round(rank));
+  const round = Math.ceil(safeRank / safeTeams);
+  const slot = ((safeRank - 1) % safeTeams) + 1;
+  const slotStr = slot.toString().padStart(2, "0");
+  const label = `${round}.${slotStr}`;
+
+  // Descriptor + tier based on rank, calibrated for a 12-team rookie draft.
+  // For other team counts the buckets shift proportionally via the round/slot
+  // computation above (e.g. an 8-team late-1st = ~rank 6-8).
+  let descriptor: string;
+  let tier: RookiePickEquivalent["tier"];
+  if (round === 1 && slot <= 3) {
+    descriptor =
+      slot === 1
+        ? "Target at #1 overall — top pick of your rookie draft"
+        : `Top of the 1st (${label}) — one of the first 3 names called`;
+    tier = "tier-1";
+  } else if (round === 1 && slot <= Math.ceil(safeTeams / 2)) {
+    descriptor = `Mid 1st (${label}) — should go in the first half of round 1`;
+    tier = "tier-1";
+  } else if (round === 1) {
+    descriptor = `Late 1st (${label}) — back end of round 1`;
+    tier = "tier-2";
+  } else if (round === 2 && slot <= Math.ceil(safeTeams / 2)) {
+    descriptor = `Early 2nd (${label}) — turn of the 1st/2nd`;
+    tier = "tier-2";
+  } else if (round === 2) {
+    descriptor = `Late 2nd (${label}) — fringe rookie-draft pick`;
+    tier = "tier-3";
+  } else if (round === 3) {
+    descriptor = `3rd-round flier (${label}) — depth/upside swing`;
+    tier = "tier-3";
+  } else {
+    descriptor = `Late round (${label}) — UDFA-tier value`;
+    tier = "tier-4";
+  }
+  return { rank: safeRank, round, slot, label, descriptor, tier };
 }

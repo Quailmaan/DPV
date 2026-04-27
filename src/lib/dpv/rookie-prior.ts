@@ -17,15 +17,21 @@ import type { Position, QBTier, ScoringFormat } from "./types";
 // Base prior by (position, round). Round 1 split into early (picks 1–16) and
 // late (17–32) — but we only get `round` from our players table today, so v1
 // uses a single R1 value. Refine if we start ingesting `overall_pick`.
+//
+// QB values are calibrated to **1-QB leagues** by default. Only ~12 starting
+// QB spots league-wide makes a rookie QB the *least* scarce R1 investment;
+// raw draft capital alone overstates them next to RBs/WRs in a 1-QB. The
+// `superflex` flag in RookiePriorInput re-inflates them via SF_QB_MULT below
+// when the caller is pricing for a SF/2-QB league.
 const BASE_BY_POSITION_ROUND: Record<Position, Record<number, number>> = {
   QB: {
-    1: 5500, // franchise QB investment — multi-year starter runway
-    2: 2200, // developmental, bridge potential
-    3: 1200,
-    4: 700,
-    5: 400,
-    6: 250,
-    7: 150,
+    1: 3600, // franchise QB investment, but in 1-QB he's behind 11 vet QB1s
+    2: 1500, // developmental, bridge potential
+    3: 850,
+    4: 500,
+    5: 280,
+    6: 180,
+    7: 110,
   },
   RB: {
     1: 5200, // bellcow investment — 3-year window
@@ -59,11 +65,37 @@ const BASE_BY_POSITION_ROUND: Record<Position, Record<number, number>> = {
 // UDFA / undrafted (no round recorded) gets a token value — plausible depth
 // flier, nothing more.
 const UDFA_BY_POSITION: Record<Position, number> = {
-  QB: 100,
+  QB: 60,
   RB: 200,
   WR: 250,
   TE: 120,
 };
+
+// Superflex / 2-QB multiplier on QB DPV. Roughly recovers the historic Superflex-
+// calibrated values (R1 ≈ 6500, R2 ≈ 3500) from the 1-QB-default base above.
+// Only meaningful for QBs — RB/WR/TE values don't shift with SF since their
+// scarcity is unchanged (FLEX still pulls from the same skill pool).
+const SF_QB_MULT_BY_ROUND: Record<number, number> = {
+  1: 1.85,
+  2: 1.65,
+  3: 1.55,
+  4: 1.45,
+  5: 1.4,
+  6: 1.4,
+  7: 1.4,
+};
+const SF_QB_MULT_UDFA = 1.4;
+
+/**
+ * Superflex/2-QB multiplier for a QB rookie's DPV. Use this when you have
+ * a 1-QB-calibrated DPV (from a snapshot or a synth call without the SF
+ * flag set) and need to display the SF-equivalent value. No-op for non-QB
+ * positions — call sites should guard accordingly.
+ */
+export function sfQbMult(round: number | null | undefined): number {
+  if (round === null || round === undefined) return SF_QB_MULT_UDFA;
+  return SF_QB_MULT_BY_ROUND[round] ?? SF_QB_MULT_UDFA;
+}
 
 // Scoring-format multipliers. QB/RB barely change; WR/TE swing with PPR.
 const FORMAT_MULT: Record<Position, Record<ScoringFormat, number>> = {
@@ -81,16 +113,33 @@ function oLineAdjust(position: Position, oLineRank: number): number {
 }
 
 function qbTierAdjust(position: Position, qbTier: QBTier): number {
-  // Only matters for pass-catchers. Tier 1 (elite) = boost; tier 5 (bad) = hit.
-  if (position !== "WR" && position !== "TE") return 1.0;
-  const map: Record<QBTier, number> = {
-    1: 1.1,
-    2: 1.05,
-    3: 1.0,
-    4: 0.92,
-    5: 0.85,
-  };
-  return map[qbTier] ?? 1.0;
+  // For pass-catchers: Tier 1 incumbent QB = boost (good thrower), Tier 5 = hit.
+  if (position === "WR" || position === "TE") {
+    const map: Record<QBTier, number> = {
+      1: 1.1,
+      2: 1.05,
+      3: 1.0,
+      4: 0.92,
+      5: 0.85,
+    };
+    return map[qbTier] ?? 1.0;
+  }
+  // For rookie QBs: incumbent QB tier sets the *starter timeline*. Drafted
+  // behind a Tier-1 vet (Stafford, Allen) means sitting all year — Y1 fantasy
+  // value is near zero and the team isn't necessarily handing him the keys
+  // soon. Drafted onto a Tier-5 QB room (LV pre-Mendoza) means immediate
+  // starter — far more dynasty-relevant value. Inverse of the WR/TE case.
+  if (position === "QB") {
+    const map: Record<QBTier, number> = {
+      1: 0.55, // entrenched elite vet, multi-year wait (e.g. Simpson behind Stafford)
+      2: 0.72, // good vet, possibly a 1-year sit
+      3: 0.95, // mediocre vet, rookie likely takes over mid-season
+      4: 1.05, // bad vet, rookie wins job in camp
+      5: 1.1,  // open competition, immediate starter (e.g. Mendoza to LV)
+    };
+    return map[qbTier] ?? 1.0;
+  }
+  return 1.0;
 }
 
 function ageAdjust(age: number | null): number {
@@ -138,6 +187,9 @@ export type RookiePriorInput = {
   // Effective comp count for this rookie (top-K, capped by pool size).
   // Drives the HSM blend weight — fewer comps = less confidence.
   hsmN?: number;
+  // Superflex / 2-QB league flag. Re-inflates the QB base values (which
+  // default to 1-QB calibration). No effect for non-QB positions.
+  superflex?: boolean;
 };
 
 export type RookiePriorResult = {
@@ -153,6 +205,7 @@ export type RookiePriorResult = {
     intraClassDepthMult: number;
     rookieDisplacementMult: number;
     combineMult: number;
+    superflexMult: number;
     athleticismScore: number | null;
     missedSeasons: number;
     // HSM blend diagnostics (null = HSM skipped).
@@ -249,6 +302,15 @@ export function computeRookiePrior(
     missed >= 1 ? input.rookieDisplacementMult ?? 1.0 : 1.0;
   const combineMult = combineAdjust(input.athleticismScore);
 
+  // Superflex multiplier — re-inflate QB base values for SF/2-QB leagues.
+  // No-op for non-QB positions (their scarcity is unchanged by SF).
+  const superflexMult =
+    input.superflex && input.position === "QB"
+      ? input.draftRound === null
+        ? SF_QB_MULT_UDFA
+        : SF_QB_MULT_BY_ROUND[input.draftRound] ?? SF_QB_MULT_UDFA
+      : 1.0;
+
   const preHsmDPV =
     base *
     oLineMult *
@@ -258,7 +320,8 @@ export function computeRookiePrior(
     lapseMult *
     intraClassDepthMult *
     displacementMult *
-    combineMult;
+    combineMult *
+    superflexMult;
 
   // HSM blend — if nearest-neighbor rookies with similar pre-draft profiles
   // produced around X PPG over their first three years, pull the structural
@@ -296,6 +359,7 @@ export function computeRookiePrior(
       intraClassDepthMult: Number(intraClassDepthMult.toFixed(3)),
       rookieDisplacementMult: Number(displacementMult.toFixed(3)),
       combineMult: Number(combineMult.toFixed(3)),
+      superflexMult: Number(superflexMult.toFixed(3)),
       athleticismScore:
         input.athleticismScore !== null && input.athleticismScore !== undefined
           ? Number(input.athleticismScore)
