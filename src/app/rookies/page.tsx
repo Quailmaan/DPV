@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createServerClient } from "@/lib/supabase/server";
 import { CURRENT_SEASON } from "@/lib/dpv/constants";
 import type { ScoringFormat } from "@/lib/dpv/types";
+import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
 
 // /rookies — current draft class view. Shows prospect consensus rankings
 // pre-draft and overlays draft capital / team / combine / rookie prior DPV
@@ -53,7 +54,22 @@ export default async function RookiesPage({
   const pos = (sp.pos || "ALL").toUpperCase();
 
   const sb = createServerClient();
-  const [prospectsRes, playersRes, combineRes, snapsRes] = await Promise.all([
+  // Pull all the data we need in parallel:
+  //   - Prospect consensus rankings (pre-draft).
+  //   - Player records for the incoming class (post-draft sync-draft-capital).
+  //   - Combine metrics for athleticism context.
+  //   - DPV snapshots for the rookie prior valuations.
+  //   - FantasyCalc market values, used for the per-position Buy/Sell badge.
+  //   - Live Sleeper roster — fallback for `current_team` when nflverse hasn't
+  //     yet published the player record (typically 1-3 days post-draft).
+  const [
+    prospectsRes,
+    playersRes,
+    combineRes,
+    snapsRes,
+    marketRes,
+    sleeperTeams,
+  ] = await Promise.all([
     sb
       .from("prospect_consensus")
       .select(
@@ -70,8 +86,16 @@ export default async function RookiesPage({
       .select("player_id, athleticism_score, forty, vertical, broad_jump"),
     sb
       .from("dpv_snapshots")
-      .select("player_id, dpv, tier, breakdown")
+      .select(
+        "player_id, dpv, tier, players(position)",
+      )
       .eq("scoring_format", fmt),
+    sb
+      .from("market_values")
+      .select("player_id, market_value_normalized")
+      .eq("scoring_format", fmt)
+      .eq("source", "fantasycalc"),
+    fetchSleeperTeams(),
   ]);
 
   if (prospectsRes.error) {
@@ -89,6 +113,7 @@ export default async function RookiesPage({
   const players = playersRes.data ?? [];
   const combine = combineRes.data ?? [];
   const snaps = snapsRes.data ?? [];
+  const market = marketRes.data ?? [];
 
   const playerByNorm = new Map<string, (typeof players)[number]>();
   for (const p of players) playerByNorm.set(normalize(p.name), p);
@@ -98,6 +123,74 @@ export default async function RookiesPage({
 
   const snapByPlayer = new Map<string, (typeof snaps)[number]>();
   for (const s of snaps) snapByPlayer.set(s.player_id, s);
+
+  const marketByPlayer = new Map<string, number>();
+  for (const m of market) {
+    const v = m.market_value_normalized;
+    if (v !== null && v !== undefined) marketByPlayer.set(m.player_id, Number(v));
+  }
+
+  // Per-position rank delta within (DPV ∩ Market). Identical signal to the
+  // trade calculator: positive delta = DPV ranks them higher than market
+  // does = potential Buy. We need the FULL universe (NFL + rookies) so the
+  // delta means the same thing here as it does on the trade page — a rookie
+  // with high DPV and no market price yet appears as no-signal, not "Buy".
+  type DpvWithPos = {
+    player_id: string;
+    dpv: number;
+    position: string | null;
+  };
+  const allDpv: DpvWithPos[] = (snaps as Array<{
+    player_id: string;
+    dpv: number;
+    players: { position: string } | { position: string }[] | null;
+  }>).map((r) => {
+    // Supabase nested-select returns either a single object or an array
+    // depending on relationship cardinality. Normalize to a string|null.
+    const pj = r.players;
+    const position = Array.isArray(pj)
+      ? pj[0]?.position ?? null
+      : pj?.position ?? null;
+    return { player_id: r.player_id, dpv: r.dpv, position };
+  });
+  const deltaByPlayer = new Map<string, number>();
+  const positionsAll = Array.from(
+    new Set(allDpv.map((p) => p.position).filter((x): x is string => !!x)),
+  );
+  for (const pos of positionsAll) {
+    const inPos = allDpv.filter(
+      (p) => p.position === pos && marketByPlayer.has(p.player_id),
+    );
+    const dpvSorted = [...inPos].sort((a, b) => b.dpv - a.dpv);
+    const mktSorted = [...inPos].sort(
+      (a, b) =>
+        (marketByPlayer.get(b.player_id) ?? 0) -
+        (marketByPlayer.get(a.player_id) ?? 0),
+    );
+    const dpvRank = new Map(
+      dpvSorted.map((p, i) => [p.player_id, i + 1]),
+    );
+    const mktRank = new Map(
+      mktSorted.map((p, i) => [p.player_id, i + 1]),
+    );
+    for (const p of inPos) {
+      const dr = dpvRank.get(p.player_id);
+      const mr = mktRank.get(p.player_id);
+      if (dr === undefined || mr === undefined) continue;
+      // Positive delta = DPV ranks higher (smaller number) than market = Buy.
+      deltaByPlayer.set(p.player_id, mr - dr);
+    }
+  }
+
+  // Buy/Sell threshold matches the trade calculator (5 ranks within position).
+  function buySell(
+    delta: number | null,
+  ): { label: "BUY" | "SELL"; tone: "buy" | "sell" } | null {
+    if (delta === null) return null;
+    if (delta >= 5) return { label: "BUY", tone: "buy" };
+    if (delta <= -5) return { label: "SELL", tone: "sell" };
+    return null;
+  }
 
   type RookieRow = {
     key: string;
@@ -110,12 +203,33 @@ export default async function RookiesPage({
     playerId: string | null;
     prospectId: string | null;
     team: string | null;
+    /** "sleeper" if team came from the Sleeper fallback, "db" if from the
+     *  players row. Used purely so the UI can hint at provenance. */
+    teamSource: "db" | "sleeper" | null;
     draftRound: number | null;
     ras: number | null;
     forty: number | null;
     dpv: number | null;
+    market: number | null;
+    marketDelta: number | null;
     tier: string | null;
   };
+
+  // Resolve a team for a row, preferring the players.current_team value and
+  // falling back to live Sleeper data when the player record doesn't exist
+  // yet (typical 1-3 day window post-draft before nflverse publishes).
+  function resolveTeam(
+    dbTeam: string | null,
+    name: string,
+    pos: string | null,
+  ): { team: string | null; source: "db" | "sleeper" | null } {
+    if (dbTeam) return { team: dbTeam, source: "db" };
+    if (pos) {
+      const sleeperTeam = sleeperTeams.get(sleeperTeamKey(name, pos));
+      if (sleeperTeam) return { team: sleeperTeam, source: "sleeper" };
+    }
+    return { team: null, source: null };
+  }
 
   const seenPlayerIds = new Set<string>();
   const rows: RookieRow[] = [];
@@ -126,10 +240,20 @@ export default async function RookiesPage({
     if (player) seenPlayerIds.add(player.player_id);
     const c = player ? combineByPlayer.get(player.player_id) : undefined;
     const s = player ? snapByPlayer.get(player.player_id) : undefined;
+    const position = pr.position ?? player?.position ?? null;
+    const { team, source: teamSource } = resolveTeam(
+      player?.current_team ?? null,
+      pr.name,
+      position,
+    );
+    const market = player ? marketByPlayer.get(player.player_id) ?? null : null;
+    const marketDelta = player
+      ? deltaByPlayer.get(player.player_id) ?? null
+      : null;
     rows.push({
       key: pr.prospect_id,
       name: pr.name,
-      position: pr.position ?? player?.position ?? null,
+      position,
       consensusRank: pr.avg_rank !== null ? Number(pr.avg_rank) : null,
       consensusGrade:
         pr.normalized_grade !== null ? Number(pr.normalized_grade) : null,
@@ -137,7 +261,8 @@ export default async function RookiesPage({
       projectedRound: pr.projected_round ?? null,
       playerId: player?.player_id ?? null,
       prospectId: pr.prospect_id,
-      team: player?.current_team ?? null,
+      team,
+      teamSource,
       draftRound: player?.draft_round ?? null,
       ras:
         c?.athleticism_score !== null && c?.athleticism_score !== undefined
@@ -145,6 +270,8 @@ export default async function RookiesPage({
           : null,
       forty: c?.forty !== null && c?.forty !== undefined ? Number(c.forty) : null,
       dpv: s?.dpv ?? null,
+      market,
+      marketDelta,
       tier: s?.tier ?? null,
     });
   }
@@ -159,6 +286,11 @@ export default async function RookiesPage({
     if (player.draft_round === null) continue;
     const c = combineByPlayer.get(player.player_id);
     const s = snapByPlayer.get(player.player_id);
+    const { team, source: teamSource } = resolveTeam(
+      player.current_team,
+      player.name,
+      player.position,
+    );
     rows.push({
       key: `player:${player.player_id}`,
       name: player.name,
@@ -169,7 +301,8 @@ export default async function RookiesPage({
       projectedRound: null,
       playerId: player.player_id,
       prospectId: null,
-      team: player.current_team,
+      team,
+      teamSource,
       draftRound: player.draft_round,
       ras:
         c?.athleticism_score !== null && c?.athleticism_score !== undefined
@@ -177,6 +310,8 @@ export default async function RookiesPage({
           : null,
       forty: c?.forty !== null && c?.forty !== undefined ? Number(c.forty) : null,
       dpv: s?.dpv ?? null,
+      market: marketByPlayer.get(player.player_id) ?? null,
+      marketDelta: deltaByPlayer.get(player.player_id) ?? null,
       tier: s?.tier ?? null,
     });
   }
@@ -215,6 +350,12 @@ export default async function RookiesPage({
 
   const draftedCount = rows.filter((r) => r.draftRound !== null).length;
   const totalCount = rows.length;
+  // "Team known" includes Sleeper-fallback hits, since the user just wants
+  // to see where rookies landed regardless of where the abbrev came from.
+  const teamKnownCount = rows.filter((r) => r.team !== null).length;
+  const sleeperFallbackCount = rows.filter(
+    (r) => r.teamSource === "sleeper",
+  ).length;
 
   return (
     <div>
@@ -228,7 +369,9 @@ export default async function RookiesPage({
           picks come in.
         </p>
         <p className="text-xs text-zinc-400 mt-1 tabular-nums">
-          {draftedCount}/{totalCount} drafted · {rows.filter((r) => r.dpv !== null).length} with DPV prior
+          {draftedCount}/{totalCount} drafted · {teamKnownCount} with team
+          {sleeperFallbackCount > 0 ? ` (${sleeperFallbackCount} via Sleeper)` : ""} ·{" "}
+          {rows.filter((r) => r.dpv !== null).length} with DPV prior
         </p>
       </div>
 
@@ -273,7 +416,7 @@ export default async function RookiesPage({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          <table className="w-full text-sm min-w-[760px]">
+          <table className="w-full text-sm min-w-[860px]">
             <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
               <tr>
                 <th className="px-3 py-2 text-left w-10">#</th>
@@ -285,11 +428,14 @@ export default async function RookiesPage({
                 <th className="px-3 py-2 text-right w-14">RAS</th>
                 <th className="px-3 py-2 text-right w-14">40</th>
                 <th className="px-3 py-2 text-right w-20">DPV</th>
+                <th className="px-3 py-2 text-right w-20">Mkt</th>
                 <th className="px-3 py-2 text-left w-36">Tier</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r, i) => (
+              {filtered.map((r, i) => {
+                const badge = buySell(r.marketDelta);
+                return (
                 <tr
                   key={r.key}
                   className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
@@ -298,23 +444,41 @@ export default async function RookiesPage({
                     {i + 1}
                   </td>
                   <td className="px-3 py-2 font-medium">
-                    {r.playerId ? (
-                      <Link
-                        href={`/player/${r.playerId}?fmt=${fmt}`}
-                        className="hover:underline"
-                      >
-                        {r.name}
-                      </Link>
-                    ) : r.prospectId ? (
-                      <Link
-                        href={`/prospect/${r.prospectId}`}
-                        className="hover:underline"
-                      >
-                        {r.name}
-                      </Link>
-                    ) : (
-                      r.name
-                    )}
+                    <span className="inline-flex items-center gap-1.5">
+                      {r.playerId ? (
+                        <Link
+                          href={`/player/${r.playerId}?fmt=${fmt}`}
+                          className="hover:underline"
+                        >
+                          {r.name}
+                        </Link>
+                      ) : r.prospectId ? (
+                        <Link
+                          href={`/prospect/${r.prospectId}`}
+                          className="hover:underline"
+                        >
+                          {r.name}
+                        </Link>
+                      ) : (
+                        r.name
+                      )}
+                      {badge && (
+                        <span
+                          title={
+                            badge.tone === "buy"
+                              ? `DPV ranks ${r.marketDelta} spots higher than market within ${r.position}`
+                              : `Market ranks ${Math.abs(r.marketDelta ?? 0)} spots higher than DPV within ${r.position}`
+                          }
+                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
+                            badge.tone === "buy"
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                          }`}
+                        >
+                          {badge.label}
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td className="px-3 py-2">
                     {r.position ? (
@@ -325,7 +489,26 @@ export default async function RookiesPage({
                       <span className="text-zinc-400">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-zinc-500">{r.team ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-500">
+                    {r.team ? (
+                      <span
+                        title={
+                          r.teamSource === "sleeper"
+                            ? "Live from Sleeper — official roster pending nflverse update"
+                            : undefined
+                        }
+                        className={
+                          r.teamSource === "sleeper"
+                            ? "italic text-zinc-500 underline decoration-dotted underline-offset-2 decoration-zinc-300 dark:decoration-zinc-700"
+                            : ""
+                        }
+                      >
+                        {r.team}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-center text-zinc-500 tabular-nums">
                     {r.draftRound ? `R${r.draftRound}` : "—"}
                   </td>
@@ -353,13 +536,19 @@ export default async function RookiesPage({
                   <td className="px-3 py-2 text-right tabular-nums font-semibold">
                     {r.dpv !== null ? r.dpv : <span className="text-zinc-400 font-normal">—</span>}
                   </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-500">
+                    {r.market !== null
+                      ? Math.round(r.market)
+                      : <span className="text-zinc-400">—</span>}
+                  </td>
                   <td className="px-3 py-2 text-xs text-zinc-500">
                     {r.tier ?? (
                       <span className="text-zinc-400">Pre-draft</span>
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

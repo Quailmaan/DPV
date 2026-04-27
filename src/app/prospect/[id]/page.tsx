@@ -7,6 +7,7 @@ import {
   type LandingSpotInput,
 } from "@/lib/dpv/landingSpot";
 import LandingSpotCard from "@/components/LandingSpotCard";
+import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
 
 // /prospect/[id] — pre-draft prospect detail. Shows what we know before
 // the player has a gsis_id: cross-source consensus grade, per-source ranks,
@@ -94,15 +95,30 @@ export default async function ProspectPage({
       (p) => normalize(p.name) === normalize(prospect.name),
     ) ?? null;
 
-  // Once a prospect has a linked player record (typically post-draft, once
-  // Sleeper publishes the team and nflverse fills in draft round), build
-  // the landing-spot analysis using that team's depth chart + context.
+  // Resolve the prospect's NFL team. Two sources, in priority order:
+  //   1. players.current_team (canonical — populated by sync-teams.ts once
+  //      a row exists in the players table).
+  //   2. Sleeper API (fallback — Sleeper publishes drafted-rookie teams
+  //      within hours, while nflverse draft_picks.csv typically lags 1-3
+  //      days. Without this fallback the LandingSpot card stays empty for
+  //      the entire post-draft window when interest is highest.)
   let landingBullets: ReturnType<typeof analyzeLandingSpot> = [];
-  let landingTeam: string | null = null;
-  let landingPosition: string = prospect.position ?? "";
-  if (linkedPlayer && linkedPlayer.current_team) {
-    landingTeam = linkedPlayer.current_team;
-    landingPosition = linkedPlayer.position;
+  let landingTeam: string | null = linkedPlayer?.current_team ?? null;
+  let landingTeamSource: "db" | "sleeper" | null = landingTeam ? "db" : null;
+  const landingPositionResolved = linkedPlayer?.position ?? prospect.position ?? null;
+  if (!landingTeam && landingPositionResolved) {
+    const sleeperTeams = await fetchSleeperTeams();
+    const fallback = sleeperTeams.get(
+      sleeperTeamKey(prospect.name, landingPositionResolved),
+    );
+    if (fallback) {
+      landingTeam = fallback;
+      landingTeamSource = "sleeper";
+    }
+  }
+  let landingPosition: string = landingPositionResolved ?? "";
+  if (landingTeam && landingPositionResolved) {
+    landingPosition = landingPositionResolved;
 
     const [teammatesRes, teamSeasonRes] = await Promise.all([
       sb
@@ -111,12 +127,12 @@ export default async function ProspectPage({
           "player_id, dpv, players!inner(name, position, current_team, birthdate)",
         )
         .eq("scoring_format", "HALF_PPR")
-        .eq("players.position", linkedPlayer.position)
-        .eq("players.current_team", linkedPlayer.current_team),
+        .eq("players.position", landingPositionResolved)
+        .eq("players.current_team", landingTeam),
       sb
         .from("team_seasons")
         .select("season, oline_composite_rank, qb_tier")
-        .eq("team", linkedPlayer.current_team)
+        .eq("team", landingTeam)
         .order("season", { ascending: false })
         .limit(1)
         .maybeSingle(),
@@ -135,7 +151,9 @@ export default async function ProspectPage({
     const teammates = (
       (teammatesRes.data ?? []) as unknown as TeammateRow[]
     )
-      .filter((r) => r.player_id !== linkedPlayer.player_id)
+      // Drop the prospect themselves if they happen to already have a DPV
+      // snapshot (rare: requires both linkedPlayer and a rookie prior).
+      .filter((r) => !linkedPlayer || r.player_id !== linkedPlayer.player_id)
       .map((r) => ({
         name: r.players.name,
         age: r.players.birthdate
@@ -153,16 +171,18 @@ export default async function ProspectPage({
         }
       | null;
 
-    const linkedAge = linkedPlayer.birthdate
+    const linkedAge = linkedPlayer?.birthdate
       ? (Date.now() - new Date(linkedPlayer.birthdate).getTime()) /
         (365.25 * 24 * 3600 * 1000)
       : null;
 
     const input: LandingSpotInput = {
-      position: linkedPlayer.position,
-      team: linkedPlayer.current_team,
-      draftRound: linkedPlayer.draft_round ?? null,
-      draftYear: linkedPlayer.draft_year ?? null,
+      position: landingPositionResolved,
+      team: landingTeam,
+      // Sleeper-only path = no draft round yet. The analyzer treats null as
+      // "skip the capital bullet" rather than guessing.
+      draftRound: linkedPlayer?.draft_round ?? null,
+      draftYear: linkedPlayer?.draft_year ?? prospect.draft_year ?? null,
       age: linkedAge,
       teammates,
       teamContext: tsRow
@@ -171,8 +191,8 @@ export default async function ProspectPage({
             qbTier: tsRow.qb_tier,
           }
         : null,
-      // Pre-draft prospect just got a linked player record — by definition
-      // no qualifying season yet, so age + landing-spot bullets are on.
+      // Pre-draft prospect just got a team — by definition no qualifying
+      // NFL season yet, so age + landing-spot bullets are on.
       isRookieProfile: true,
     };
     landingBullets = analyzeLandingSpot(input);
@@ -326,12 +346,20 @@ export default async function ProspectPage({
         </div>
       )}
 
-      {linkedPlayer && (
-        <LandingSpotCard
-          bullets={landingBullets}
-          team={landingTeam}
-          position={landingPosition}
-        />
+      {landingTeam && (
+        <div className="mb-8">
+          {landingTeamSource === "sleeper" && (
+            <div className="mb-2 text-xs text-zinc-500">
+              Team via live Sleeper roster — official record from nflverse
+              follows within 1-3 days post-draft.
+            </div>
+          )}
+          <LandingSpotCard
+            bullets={landingBullets}
+            team={landingTeam}
+            position={landingPosition}
+          />
+        </div>
       )}
 
       {combine && (
@@ -477,7 +505,7 @@ export default async function ProspectPage({
         </div>
       )}
 
-      {!linkedPlayer && (
+      {!linkedPlayer && !landingTeam && (
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 p-4 text-sm text-zinc-600 dark:text-zinc-400">
           <b className="text-zinc-800 dark:text-zinc-200">No NFL team yet.</b>{" "}
           Rookie prior DPV, combine athleticism, and landing-spot modifiers
