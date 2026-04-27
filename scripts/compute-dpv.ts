@@ -375,6 +375,85 @@ async function main() {
     return row.snap_share_pct ?? null;
   }
 
+  // Recency floor for opportunity inputs. By default we read the most-recent
+  // season's opportunity metrics, but when an established player (3+ qualifying
+  // seasons in the last 3 yrs) has a disrupted latest season (<14 games), use
+  // a games-weighted blend across the qualifying window instead. This stops a
+  // single injury year from collapsing the opportunity multiplier and tanking
+  // DPV for a player whose role hasn't actually changed.
+  //
+  // Real-world example: Garrett Wilson 2022-2024 averaged ~27% target share
+  // across 17g seasons; his disrupted 2025 (7g, 12.5% tgt share) crashed his
+  // DPV from starter-caliber into bench territory despite no role change.
+  // The blend recovers the trajectory and tags him correctly as a starter
+  // for landing-spot depth-chart analysis.
+  function buildOpportunityInputs(
+    rawSeasons: ReadonlyArray<(typeof seasons)[number]>,
+    mostRecent: (typeof seasons)[number],
+  ): {
+    snapSharePct: number;
+    targetSharePct: number | undefined;
+    opportunitySharePct: number | undefined;
+    teamVacatedTargetPct: number;
+    projectedAbsorptionRate: number;
+  } {
+    const qualifying = rawSeasons
+      .filter((s) => s.season >= CURRENT_SEASON - 3)
+      .slice(0, 3);
+    const useBlend =
+      qualifying.length >= 3 && (mostRecent.games_played ?? 0) < 14;
+
+    if (!useBlend) {
+      return {
+        snapSharePct: mostRecent.snap_share_pct ?? 0,
+        targetSharePct: mostRecent.target_share_pct ?? undefined,
+        opportunitySharePct: mostRecent.opportunity_share_pct ?? undefined,
+        teamVacatedTargetPct: 0,
+        projectedAbsorptionRate: 0,
+      };
+    }
+
+    // Weight each metric only by the games where it was actually reported
+    // (a season with null snap_share but valid target_share shouldn't drag
+    // the snap-share blend toward zero).
+    let snapSum = 0;
+    let snapGames = 0;
+    let targetSum = 0;
+    let targetGames = 0;
+    let oppSum = 0;
+    let oppGames = 0;
+    for (const s of qualifying) {
+      const g = s.games_played ?? 0;
+      if (g <= 0) continue;
+      if (s.snap_share_pct !== null) {
+        snapSum += s.snap_share_pct * g;
+        snapGames += g;
+      }
+      if (s.target_share_pct !== null) {
+        targetSum += s.target_share_pct * g;
+        targetGames += g;
+      }
+      if (s.opportunity_share_pct !== null) {
+        oppSum += s.opportunity_share_pct * g;
+        oppGames += g;
+      }
+    }
+    return {
+      snapSharePct:
+        snapGames > 0 ? snapSum / snapGames : mostRecent.snap_share_pct ?? 0,
+      targetSharePct:
+        targetGames > 0
+          ? targetSum / targetGames
+          : mostRecent.target_share_pct ?? undefined,
+      opportunitySharePct:
+        oppGames > 0
+          ? oppSum / oppGames
+          : mostRecent.opportunity_share_pct ?? undefined,
+      teamVacatedTargetPct: 0,
+      projectedAbsorptionRate: 0,
+    };
+  }
+
   function displacementFor(
     position: Position,
     team: string | null,
@@ -581,13 +660,7 @@ async function main() {
           age,
         },
         seasons: seasonStats,
-        opportunity: {
-          snapSharePct: mostRecent.snap_share_pct ?? 0,
-          targetSharePct: mostRecent.target_share_pct ?? undefined,
-          opportunitySharePct: mostRecent.opportunity_share_pct ?? undefined,
-          teamVacatedTargetPct: 0,
-          projectedAbsorptionRate: 0,
-        },
+        opportunity: buildOpportunityInputs(rawSeasons, mostRecent),
         situation: {
           teamOLineCompositeRank: olineRank,
           qbTier,
