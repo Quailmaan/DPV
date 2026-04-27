@@ -3,249 +3,279 @@ export default function MethodologyPage() {
     <div className="prose prose-zinc dark:prose-invert max-w-none">
       <h1 className="text-2xl font-semibold tracking-tight">Methodology</h1>
       <p className="text-zinc-500 text-sm mt-1">
-        How the DPV (Dynasty Player Valuation) score is computed.
+        The shape of how DPV (Dynasty Player Valuation) is computed — what
+        goes in, why each piece is there, and how they combine.
       </p>
 
       <section className="mt-6 space-y-4 text-sm leading-6">
         <div>
-          <h2 className="font-semibold text-base">Core formula</h2>
-          <pre className="bg-zinc-100 dark:bg-zinc-900 rounded-md p-3 overflow-x-auto text-xs">
-{`DPV_raw = BPS × AgeMod × Opportunity × OLineMod × QBQuality × BBCS × ScoringFmt
-DPV_final = DPV_raw × PositionalScarcity
-DPV_normalized = round(DPV_final × 380)  // scaled to 0-10000`}
-          </pre>
-        </div>
-
-        <div>
-          <h2 className="font-semibold text-base">Base Production Score (BPS)</h2>
+          <h2 className="font-semibold text-base">The short version</h2>
           <p>
-            Recency-weighted fantasy PPG over the last 3 qualifying seasons.
-            Weights are position-specific: RB 55/30/15, WR 50/30/20, TE/QB
-            45/30/25. A season must have 7+ games played to qualify.
+            DPV blends what a player is producing right now, how that
+            production tends to age, the size of the role they&apos;re
+            stepping into, the team context around them, and a positional
+            scarcity adjustment that respects league construction. Each
+            piece nudges the score up or down. The final number lands on a
+            stable scale that&apos;s comparable across positions and across
+            scoring formats.
+          </p>
+          <p>
+            The components below are listed roughly in the order they enter
+            the calculation. Specific weights, thresholds, and curve shapes
+            are tuned against historical hit rates and aren&apos;t published
+            here.
           </p>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Age Modifier</h2>
+          <h2 className="font-semibold text-base">Recent production</h2>
           <p>
-            Position-specific aging curves derived from historical peak-season
-            data (2000-2025). RBs peak at 24 (mod 1.22), WRs peak 24-25 (1.25),
-            TEs peak at 26 (1.22). Curves account for WRs holding ~88% of peak
-            through age 30 and the TE &ldquo;late bloomer&rdquo; pattern.
+            The starting point is a player&apos;s fantasy points per game
+            across their last few qualifying seasons, weighted toward the
+            most recent. Position-specific weighting reflects how stable
+            each position is year-over-year — RB usage swings the most, QBs
+            and TEs the least. A season needs enough games played to be
+            informative; partial seasons get partial credit.
+          </p>
+          <p>
+            For established players who had one disrupted year (injury,
+            suspension), the role inputs blend across the qualifying
+            window so that a single torn ACL doesn&apos;t collapse the
+            score for a player whose role hasn&apos;t actually changed.
           </p>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Opportunity Score</h2>
+          <h2 className="font-semibold text-base">Aging curves</h2>
           <p>
-            Weighted combination of snap share, target/touch share, and
-            vacated-target inheritance. For RBs, &ldquo;opportunity share&rdquo; =
-            (carries + targets) / team total. For WRs/TEs, target share is the
-            stickiest predictor.
+            Production gets adjusted by where a player sits on their
+            position&apos;s aging curve. The curves come from two-plus
+            decades of historical peak-season data: RBs peak earliest and
+            fall hardest, WRs hold a high plateau into their late twenties,
+            TEs ramp later and hold their value longer, QBs are the most
+            forgiving of the four. The curve shape matters more than any
+            single multiplier — DPV reflects the trajectory, not just the
+            current snapshot.
           </p>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Situation Modifiers</h2>
+          <h2 className="font-semibold text-base">Role / opportunity</h2>
+          <p>
+            How much of the team&apos;s offense actually runs through this
+            player. The mix is position-aware: snap share is the floor,
+            touch volume captures the ground game, and target share is the
+            stickiest predictor for receivers. Open opportunity ahead of
+            the player — vacancies on the depth chart, recently departed
+            primary backs, lost target volume — gets partial credit too,
+            because somebody is going to absorb that work.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="font-semibold text-base">Team context</h2>
           <ul className="list-disc pl-6 space-y-1">
             <li>
-              <b>O-Line Quality:</b> team rank (1-32 per season) derived from
-              yards-before-contact per rush attempt, pulled from PFR advanced
-              stats via nflverse. YBC strips out what the RB does AFTER the
-              OL&apos;s job, so it isolates the front-five signal far better
-              than raw YPC. Coverage: 2018+, min 100 team attempts; earlier
-              seasons fall back to YPC. Strong effect on RBs; we hide the
-              row for WR/TE/QB since the multiplier barely moves them.
+              <b>Offensive line.</b> Front-five strength is derived from
+              yards-before-contact data rather than raw rushing average —
+              YBC strips out what the back does after contact and isolates
+              the line&apos;s actual job. Strong effect on RB scoring,
+              near-zero on receivers and QBs, so the row is hidden for
+              non-RBs.
             </li>
             <li>
-              <b>QB Quality:</b> 5 tiers by starter fantasy PPG. Strong effect
-              on WRs/TEs, near-zero on RBs. Multiplier is damped when QB tier
-              is stable across the BPS window to avoid double-counting.
+              <b>QB tier.</b> Quarterback play is bucketed by recent
+              starter production. Strong effect on the receivers they
+              throw to, near-zero on the backs behind them. The bump is
+              damped when a player has been with the same QB tier for
+              multiple seasons, so the model isn&apos;t double-counting
+              context that&apos;s already baked into past production.
             </li>
             <li>
-              <b>Boom/Bust Consistency (BBCS):</b> coefficient of variation on
-              weekly fantasy points. Rewards floor, penalizes volatility.
+              <b>Boom/bust.</b> Weekly variance gets a small adjustment —
+              floor is rewarded, ceiling-or-zero scoring is penalized.
+              Useful at the margins for cash-game lineups; deliberately
+              not the dominant signal.
             </li>
           </ul>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Positional Scarcity</h2>
+          <h2 className="font-semibold text-base">Positional scarcity</h2>
           <p>
-            Top 3 at position × 1.18, Top 6 × 1.10, Top 12 × 1.00, Top 24 ×
-            0.92, below × 0.80. Calibrated to 12-team 1QB leagues.
+            A top-3 player at a thin position is worth more than a top-3
+            player at a deep one — that&apos;s the whole point of trading
+            across positions in dynasty. DPV applies a scarcity adjustment
+            that boosts the top of each position group and discounts the
+            deep bench. The default scaling assumes standard 12-team
+            league construction; on the trade page, values recalibrate to
+            your actual roster setup when a Sleeper league is connected
+            (Superflex, TE-premium, larger or smaller leagues all shift
+            the curve).
           </p>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Market Calibration</h2>
+          <h2 className="font-semibold text-base">Market calibration</h2>
           <p>
-            FantasyCalc dynasty trade values (1QB, same PPR setting) are
-            fetched per format and displayed alongside DPV with a delta column.
-            Green delta = DPV values the player higher than the market
-            (potential buy); red = market values higher (potential sell).
+            FantasyCalc dynasty trade values are pulled per scoring format
+            and shown alongside DPV with a delta column. Where the two
+            disagree, the delta flags potential buys (DPV values the
+            player higher than the market) and potential sells (market
+            higher than DPV) — a value-vs-perception read, not a price
+            replacement.
           </p>
         </div>
 
         <div>
           <h2 className="font-semibold text-base">
-            Historical Situation Matching (HSM)
+            Historical comparables
           </h2>
           <p>
-            For each active player, we find the 8 most similar (player,
-            season) anchors in NFL history and summarize what happened
-            next. Each anchor becomes a 7-dim feature vector — position,
-            age, usage, context, and a year-over-year PPG delta so a
-            trending-up 22 y.o. doesn&apos;t get comped to a flat-lining
-            one. Distance is scaled Euclidean using per-feature standard
-            deviations over the pool, so tight features (target share)
-            separate more than wide ones (PPG). Similarity decays as{" "}
-            <code className="text-xs">exp(-d/2)</code> — closest comps
-            dominate the weighted average.
+            For each active player, we identify their closest historical
+            comparables: players at the same position who, at a similar
+            age and role profile, faced a similar situation. The
+            comparison runs on a multi-dimensional similarity metric —
+            position, age, usage, context, and the year-over-year
+            trajectory of their production, so a 22-year-old trending up
+            doesn&apos;t get matched to a 22-year-old who&apos;s flat.
           </p>
           <p>
-            Projections span three seasons (t+1, t+2, t+3) with weights
-            0.5 / 0.3 / 0.2. If a comp&apos;s tail years aren&apos;t
-            observable yet, the weight redistributes proportionally
-            across remaining horizons rather than dropping the comp. The
-            blended projection feeds DPV at 40% for HIGH confidence
-            (n≥6), 25% MEDIUM (n≥4), 10% LOW, so in the common case the
-            model still dominates but the long-horizon trajectory has a
-            voice.
+            What happened to those comps over the next three NFL seasons
+            blends into a forward projection that nudges DPV. The closer
+            the comp set, the more weight the trajectory carries; loose
+            matches contribute little. In the common case the production
+            and context model still dominates, but the long-horizon
+            history has a voice.
           </p>
         </div>
 
         <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
-          <h2 className="font-semibold text-base">Dynasty Rookie Picks</h2>
+          <h2 className="font-semibold text-base">Rookie picks</h2>
           <p>
-            Three draft years are tradeable at any time: the upcoming class
-            plus the following two. The window rolls forward on September 1 —
-            once the NFL season begins, the nearest class&apos;s rookies
-            graduate into the player pool (priced via the rookie prior, below)
-            and a new +3 year enters.
+            Three rookie draft years are tradeable at any time — the
+            upcoming class plus the next two. The window rolls forward
+            when the NFL season begins: that year&apos;s class graduates
+            into the player pool (priced via the rookie prior, below) and
+            a new +3 year enters.
           </p>
-          <pre className="bg-zinc-100 dark:bg-zinc-900 rounded-md p-3 overflow-x-auto text-xs">
-{`pick_dpv = BASELINE_1_01 × curve(round, slot) × year_distance × class_mult(slot)
-year_distance: { current: 1.0, +1 year: 0.75, +2 years: 0.55 }`}
-          </pre>
           <p>
-            The curve is steep through R1 (1.01 → 1.0, 1.06 → 0.50, 1.12 →
-            0.29) and flattens through R3 (3.01 → 0.06, 3.12 → 0.018),
-            calibrated to typical dynasty market shape.
+            Pick value follows a steep curve through the first round,
+            flattens through the second and third, and discounts future
+            years on a per-year decay. The curve is then scaled by{" "}
+            <i>class strength</i> so a deep class doesn&apos;t hit the
+            same value cliff as a thin one.
           </p>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Class Strength (slot-aware)</h2>
+          <h2 className="font-semibold text-base">Class strength</h2>
           <p>
-            Within-year rankings are zero-sum — they can&apos;t tell us whether
-            2027 is deeper than 2026. Instead, we use two cross-year anchors
-            derived from public big boards and mock drafts:
+            Within-year rankings are zero-sum — they can&apos;t tell us
+            whether next year&apos;s class is deeper than this
+            year&apos;s. To make cross-year comparisons honest, class
+            strength is anchored on how many prospects projected NFL
+            top-15 and top-32 boards see — those tiers mean roughly the
+            same thing every year, so the counts genuinely compare across
+            classes.
           </p>
-          <ul className="list-disc pl-6 space-y-1">
-            <li>
-              <b>r1_offensive_count</b> — QB/RB/WR/TE prospects whose averaged
-              projected NFL overall pick is ≤ 32.
-            </li>
-            <li>
-              <b>top15_offensive_count</b> — same, with pick ≤ 15 (elite tier).
-            </li>
-          </ul>
           <p>
-            An NFL R1 means the same thing in every class, so these counts
-            genuinely compare across years. They feed a per-slot multiplier:
-          </p>
-          <ul className="list-disc pl-6 space-y-1">
-            <li>
-              Picks up to the class&apos;s R1 offensive depth hold baseline value.
-            </li>
-            <li>
-              Past that cliff, each slot loses 4% (floor 0.5).
-            </li>
-            <li>
-              Top 5 slots get a head boost (or penalty) scaled to top-15 count
-              vs the 3-prospect baseline. Capped at 1.15×.
-            </li>
-          </ul>
-          <p>
-            Effect: a class with 5 projected R1 offensive prospects keeps
-            1.01-1.05 at full value but bleeds 1.06 onward; a class with 10
-            holds the entire first round at baseline.
+            The result feeds a per-slot multiplier: picks within a
+            class&apos;s projected R1 offensive depth hold full value;
+            past that cliff, each slot loses ground. A class with double
+            the usual R1 talent holds the entire first round at full
+            value; a thin class bleeds value starting halfway through R1.
           </p>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Prospect Consensus</h2>
+          <h2 className="font-semibold text-base">Prospect consensus</h2>
           <p>
-            Class counts ride on a multi-source prospects table (Drafttek,
-            WalterFootball, NBA Draft Room, etc.). Sites use wildly different
-            grade scales — scout grades 60-100, KTC in the thousands, some
-            just rank — so we convert each source&apos;s grades to ranks within
-            the draft year, average ranks per prospect across sources, and map
-            back to a normalized 0-100 grade via exponential decay (rank 1 →
-            100, rank 10 → ~64, rank 25 → ~29). Projected pick and round
-            average across sources that provide them. Prospects appearing in
-            only one source still contribute, with source_count = 1.
+            Class counts ride on a multi-source prospects table — major
+            draft boards plus a handful of independent rankers. Sites
+            grade on wildly different scales (some 60-100, some in the
+            thousands, some rank-only), so each source is normalized to
+            ranks within the draft year, ranks are averaged across
+            sources per prospect, and the average is mapped back to a
+            single 0-100 grade. Prospects covered by only one source
+            still surface, with the single-source caveat reflected in the
+            source count.
           </p>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Rookie Prior Model</h2>
+          <h2 className="font-semibold text-base">Rookie prior</h2>
           <p>
-            Drafted rookies with no NFL production are priced via a separate
-            prior — DPV can&apos;t run on seasons that don&apos;t exist yet. The
-            prior starts from a base value per position and NFL draft round,
-            then applies landing-spot modifiers:
-          </p>
-          <pre className="bg-zinc-100 dark:bg-zinc-900 rounded-md p-3 overflow-x-auto text-xs">
-{`prior_dpv = base(position, draft_round)
-          × oLineMult(team oline rank)
-          × qbTierMult(team qb tier)   // WR / TE only
-          × ageMult(prospect age)
-          × formatMult(scoring_format, position)
-          × lapseMult(missed_seasons, max_games)`}
-          </pre>
-          <p>
-            Base values descend by NFL round: QB R1 ≈ 5500, RB R1 ≈ 5200, WR
-            R1 ≈ 4800, TE R1 ≈ 3400, falling roughly 40% per round. Format
-            multipliers adjust for scoring — RBs gain in standard, WRs gain in
-            full PPR. A prior stays in effect until the rookie accumulates a
-            qualifying season of real production, at which point the standard
-            DPV path takes over.
+            Drafted rookies with no NFL production yet get priced through
+            a separate prior — there&apos;s no production history to
+            weight. The prior starts from a position-and-NFL-draft-round
+            baseline (capital is one of the strongest available signals
+            on rookie fantasy outcomes), then folds in the landing
+            spot&apos;s offensive line, the QB tier for receivers, the
+            prospect&apos;s age, the scoring format, and any displacement
+            from same-position competition on the new roster.
           </p>
           <p>
-            <b>Lapse decay:</b> the prior assumes draft capital will translate
-            into production. Each post-draft season that passes without a
-            qualifying (7+ game) year is strong evidence against that
-            assumption, so the prior decays — 1 missed year ≈ 0.45–0.55×, 2
-            missed years ≈ 0.22×, 3+ ≈ 0.10×. A player drafted in 2024 who
-            logged only 3 games across their first two seasons gets priced as
-            a depth flier, not a fresh R2 rookie.
+            QB priors flip into a much higher tier in Superflex /
+            two-QB league setups, since a rookie QB who locks in even an
+            average starter job is suddenly a top-of-class asset.
+          </p>
+          <p>
+            The prior assumes NFL capital will translate into production.
+            Each post-draft season that passes without a meaningful
+            workload is strong evidence against that assumption, so the
+            prior fades. A player who logged only a handful of games
+            across their first two seasons gets priced as a depth flier,
+            not a fresh rookie. Once a qualifying season of real
+            production lands, the standard DPV pipeline takes over.
           </p>
         </div>
 
         <div>
-          <h2 className="font-semibold text-base">Draft Capital Sync</h2>
+          <h2 className="font-semibold text-base">Draft capital sync</h2>
           <p>
-            Rookie priors require each player&apos;s actual NFL draft round
-            and year. These come from nflverse&apos;s{" "}
-            <code className="text-xs">draft_picks</code> release (matched on
-            gsis_id), synced twice daily alongside the standard refresh.
-            Missing draft capital is backfilled before each DPV compute run,
-            so priors begin scoring new rookies the moment nflverse publishes
-            the class.
+            Rookie priors require each player&apos;s actual NFL draft
+            round and year. Those come from nflverse&apos;s draft-picks
+            release, matched on player ID and synced twice daily
+            alongside the standard refresh. Missing draft capital is
+            backfilled before each compute run, so priors begin scoring
+            new rookies the moment the class is published. In the gap
+            between the actual NFL draft and nflverse&apos;s roster
+            release (typically 1-3 days), Sleeper&apos;s live rosters
+            stand in so the player&apos;s landing spot still reads on the
+            page.
           </p>
         </div>
 
         <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
-          <h2 className="font-semibold text-base">Planned (v2)</h2>
+          <h2 className="font-semibold text-base">A note on tuning</h2>
+          <p>
+            Specific weights, thresholds, and curve constants are tuned
+            against historical year-over-year hit rates — the goal is
+            calibration, not novelty. Where two reasonable choices
+            produced similar out-of-sample fits, the simpler one wins.
+            Where the data forced a less obvious shape (the WR aging
+            plateau into the late twenties, the RB cliff at 28, the TE
+            late-bloom pattern), the curve follows the data even when it
+            disagrees with conventional dynasty wisdom.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="font-semibold text-base">Planned</h2>
           <ul className="list-disc pl-6 space-y-1">
-            <li>Percentile-based market delta (normalized across scale gap)</li>
             <li>
-              More prospect sources (NFL.com, ESPN, PFF) to reduce consensus
-              noise on 2027/2028 classes
+              Percentile-based market delta to neutralize scale gaps
+              between DPV and FantasyCalc
             </li>
-            <li>Dedicated rookie board view once 2026 class is drafted</li>
+            <li>
+              More prospect sources (NFL.com, ESPN, PFF) to reduce
+              consensus noise on out-year classes
+            </li>
+            <li>
+              League-shape calibration on the rookies page, mirroring the
+              trade page&apos;s Sleeper-aware scarcity
+            </li>
           </ul>
         </div>
       </section>
