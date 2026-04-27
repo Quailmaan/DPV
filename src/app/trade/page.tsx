@@ -1,10 +1,29 @@
 import { createServerClient } from "@/lib/supabase/server";
+import { CURRENT_SEASON } from "@/lib/dpv/constants";
 import type { ScoringFormat } from "@/lib/dpv/types";
 import { generatePickPlayers } from "@/lib/picks/values";
+import {
+  generateRookieTradeEntries,
+  roundFromOverallPick,
+  type RookieValueInput,
+} from "@/lib/rookies/values";
+import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
 import TradeCalculator, {
   type TradePlayer,
   type LeagueRosterOption,
 } from "./TradeCalculator";
+
+// Same name normalization as /rookies — used to detect when a synthetic
+// rookie entry duplicates a real DPV snapshot (post-publish). Once
+// nflverse + compute-dpv land a real prior, the synthetic version drops out.
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "")
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 type SearchParams = Promise<{
   fmt?: string;
@@ -194,10 +213,101 @@ export default async function TradePage({
     };
   }
 
-  // Merge rookie picks into the tradeable pool. They're ranked alongside NFL
-  // players by DPV so the search dropdown blends them naturally.
+  // Synthetic rookie tradeable entries — bridge the post-draft window
+  // before nflverse publishes draft_picks.csv (typically 1-3 days). After
+  // that, compute-dpv produces a real rookie prior in dpv_snapshots and
+  // the synthetic entry is filtered out below by name match.
+  const incomingClassYear = CURRENT_SEASON + 1;
+  const [{ data: prospectRows }, sleeperTeams] = await Promise.all([
+    sb
+      .from("prospect_consensus")
+      .select(
+        "prospect_id, name, position, normalized_grade, projected_round, projected_overall_pick",
+      )
+      .eq("draft_year", incomingClassYear),
+    fetchSleeperTeams(),
+  ]);
+
+  // team_seasons context for the latest available season per team — drives
+  // the OL/QB-tier landing-spot multipliers inside computeRookiePrior. One
+  // pull, indexed by team for O(1) lookup per rookie.
+  const { data: teamSeasonRows } = await sb
+    .from("team_seasons")
+    .select("team, season, oline_composite_rank, qb_tier")
+    .order("season", { ascending: false });
+  const latestTeamCtx = new Map<
+    string,
+    { olineRank: number | null; qbTier: number | null }
+  >();
+  for (const row of (teamSeasonRows ?? []) as Array<{
+    team: string;
+    oline_composite_rank: number | null;
+    qb_tier: number | null;
+  }>) {
+    if (!latestTeamCtx.has(row.team)) {
+      latestTeamCtx.set(row.team, {
+        olineRank: row.oline_composite_rank,
+        qbTier: row.qb_tier,
+      });
+    }
+  }
+
+  // Names that already have a real DPV snapshot (NFL or post-publish rookie
+  // prior). Synthetic rookies whose normalized names match are dropped so
+  // the calculator doesn't show two entries for the same player.
+  const realPlayerNames = new Set<string>(
+    nflPlayers.map((p) => normalizeName(p.name)),
+  );
+
+  const rookieInputs: RookieValueInput[] = [];
+  for (const row of (prospectRows ?? []) as Array<{
+    prospect_id: string;
+    name: string;
+    position: string | null;
+    normalized_grade: number | null;
+    projected_round: number | null;
+    projected_overall_pick: number | null;
+  }>) {
+    if (!row.position) continue;
+    if (realPlayerNames.has(normalizeName(row.name))) continue;
+    const projectedRound =
+      row.projected_round ?? roundFromOverallPick(row.projected_overall_pick);
+    // Sleeper-resolved team: hits when Sleeper has them on a roster
+    // (either drafted or picked up as a UDFA). Null means undrafted +
+    // unsigned — we still emit a synthetic entry but it'll have no
+    // landing-spot context.
+    const team =
+      sleeperTeams.get(sleeperTeamKey(row.name, row.position)) ?? null;
+    const teamCtx = team ? latestTeamCtx.get(team) ?? null : null;
+    rookieInputs.push({
+      prospect: {
+        prospectId: row.prospect_id,
+        name: row.name,
+        position: row.position,
+        projectedRound,
+        consensusGrade:
+          row.normalized_grade !== null
+            ? Number(row.normalized_grade)
+            : null,
+        // Pre-publish prospects don't carry birthdate, so age stays null
+        // and the prior treats it as neutral. Real ageAtDraft folds in
+        // once compute-dpv replaces the synthetic with a real prior.
+        ageAtDraft: null,
+        draftYear: incomingClassYear,
+      },
+      team,
+      teamContext: teamCtx,
+      scoringFormat: fmt,
+    });
+  }
+  const synthRookies = generateRookieTradeEntries(rookieInputs);
+
+  // Merge picks + synthetic rookies into the tradeable pool. NFL players,
+  // synthetic rookies, and rookie picks are ranked together by DPV so the
+  // search dropdown blends them naturally.
   const players: TradePlayer[] = [
     ...nflPlayers,
+    ...synthRookies,
     ...generatePickPlayers(new Date(), classOverrides),
   ].sort((a, b) => b.dpv - a.dpv);
 
