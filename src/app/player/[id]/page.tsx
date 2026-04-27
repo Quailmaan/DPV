@@ -3,6 +3,11 @@ import { notFound } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
 import type { DPVBreakdown } from "@/lib/dpv/types";
 import type { ScoringFormat } from "@/lib/dpv/types";
+import {
+  analyzeLandingSpot,
+  type LandingSpotInput,
+} from "@/lib/dpv/landingSpot";
+import LandingSpotCard from "@/components/LandingSpotCard";
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: "STANDARD", label: "Standard" },
@@ -257,11 +262,14 @@ export default async function PlayerPage({
       ? Math.round(Number(market.market_value_normalized))
       : null;
 
-  // Position-wide DPV + market fetch (used for position rank + market delta)
-  const [allDpvRes, allMktRes] = await Promise.all([
+  // Position-wide DPV + market fetch (used for position rank, market delta,
+  // and the landing-spot teammate scan — same-team same-position blockers).
+  const [allDpvRes, allMktRes, teamSeasonRes] = await Promise.all([
     sb
       .from("dpv_snapshots")
-      .select("player_id, dpv, players!inner(position)")
+      .select(
+        "player_id, dpv, players!inner(name, position, current_team, birthdate)",
+      )
       .eq("scoring_format", fmt)
       .eq("players.position", player.position),
     sb
@@ -270,6 +278,17 @@ export default async function PlayerPage({
       .eq("scoring_format", fmt)
       .eq("source", "fantasycalc")
       .eq("players.position", player.position),
+    // Most-recent team_seasons row for the player's current team. Provides
+    // O-line composite rank (1 best–32 worst) and QB tier (1 best–5 worst).
+    player.current_team
+      ? sb
+          .from("team_seasons")
+          .select("season, oline_composite_rank, qb_tier")
+          .eq("team", player.current_team)
+          .order("season", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ]);
 
   // Full position rank by DPV across all ranked players at this position.
@@ -304,6 +323,68 @@ export default async function PlayerPage({
     dpvPosRank !== null && mktPosRank !== null
       ? mktPosRank - dpvPosRank
       : null;
+
+  // ── Landing-spot bullets ──────────────────────────────────────────
+  // Treat anyone without a 7+-game qualifying season as a "rookie profile"
+  // so the analyzer surfaces age + landing-spot bullets that wouldn't
+  // matter for an established vet.
+  const hasQualifyingSeason = seasons.some(
+    (s) => (s.games_played ?? 0) >= 7,
+  );
+  const isRookieProfile = !hasQualifyingSeason;
+
+  // Same-position teammates on the same team. We already pulled all DPV
+  // for this position above; just narrow down + exclude self.
+  type AllDpvRow = {
+    player_id: string;
+    dpv: number;
+    players: {
+      name: string;
+      position: string;
+      current_team: string | null;
+      birthdate: string | null;
+    };
+  };
+  const teammates = ((allDpvRes.data ?? []) as unknown as AllDpvRow[])
+    .filter(
+      (r) =>
+        r.player_id !== id &&
+        r.players?.current_team !== null &&
+        r.players?.current_team === player.current_team,
+    )
+    .map((r) => ({
+      name: r.players.name,
+      age: r.players.birthdate
+        ? (Date.now() - new Date(r.players.birthdate).getTime()) /
+          (365.25 * 24 * 3600 * 1000)
+        : null,
+      dpv: r.dpv,
+    }));
+
+  const teamSeasonRow = teamSeasonRes.data as
+    | {
+        season: number;
+        oline_composite_rank: number | null;
+        qb_tier: number | null;
+      }
+    | null;
+
+  const landingSpotInput: LandingSpotInput = {
+    position: player.position,
+    team: player.current_team ?? null,
+    draftRound: player.draft_round ?? null,
+    draftYear: player.draft_year ?? null,
+    age: age,
+    teammates,
+    teamContext: teamSeasonRow
+      ? {
+          olineRank: teamSeasonRow.oline_composite_rank,
+          qbTier: teamSeasonRow.qb_tier,
+        }
+      : null,
+    isRookieProfile,
+  };
+  const landingBullets = analyzeLandingSpot(landingSpotInput);
 
   return (
     <div>
@@ -547,6 +628,12 @@ export default async function PlayerPage({
           </div>
         </div>
       )}
+
+      <LandingSpotCard
+        bullets={landingBullets}
+        team={player.current_team ?? null}
+        position={player.position}
+      />
 
       {hsm && hsm.comps.length > 0 && (
         <div className="mb-8">

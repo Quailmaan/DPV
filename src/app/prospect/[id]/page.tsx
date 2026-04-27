@@ -2,6 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
 import { fetchCombineMetrics } from "@/lib/combine/csv";
+import {
+  analyzeLandingSpot,
+  type LandingSpotInput,
+} from "@/lib/dpv/landingSpot";
+import LandingSpotCard from "@/components/LandingSpotCard";
 
 // /prospect/[id] — pre-draft prospect detail. Shows what we know before
 // the player has a gsis_id: cross-source consensus grade, per-source ranks,
@@ -80,12 +85,98 @@ export default async function ProspectPage({
   // for the same draft class), let the visitor jump to the full profile.
   const { data: playerMatches } = await sb
     .from("players")
-    .select("player_id, name, position, current_team, draft_round, draft_year")
+    .select(
+      "player_id, name, position, current_team, draft_round, draft_year, birthdate",
+    )
     .eq("draft_year", prospect.draft_year);
   const linkedPlayer =
     (playerMatches ?? []).find(
       (p) => normalize(p.name) === normalize(prospect.name),
     ) ?? null;
+
+  // Once a prospect has a linked player record (typically post-draft, once
+  // Sleeper publishes the team and nflverse fills in draft round), build
+  // the landing-spot analysis using that team's depth chart + context.
+  let landingBullets: ReturnType<typeof analyzeLandingSpot> = [];
+  let landingTeam: string | null = null;
+  let landingPosition: string = prospect.position ?? "";
+  if (linkedPlayer && linkedPlayer.current_team) {
+    landingTeam = linkedPlayer.current_team;
+    landingPosition = linkedPlayer.position;
+
+    const [teammatesRes, teamSeasonRes] = await Promise.all([
+      sb
+        .from("dpv_snapshots")
+        .select(
+          "player_id, dpv, players!inner(name, position, current_team, birthdate)",
+        )
+        .eq("scoring_format", "HALF_PPR")
+        .eq("players.position", linkedPlayer.position)
+        .eq("players.current_team", linkedPlayer.current_team),
+      sb
+        .from("team_seasons")
+        .select("season, oline_composite_rank, qb_tier")
+        .eq("team", linkedPlayer.current_team)
+        .order("season", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    type TeammateRow = {
+      player_id: string;
+      dpv: number;
+      players: {
+        name: string;
+        position: string;
+        current_team: string | null;
+        birthdate: string | null;
+      };
+    };
+    const teammates = (
+      (teammatesRes.data ?? []) as unknown as TeammateRow[]
+    )
+      .filter((r) => r.player_id !== linkedPlayer.player_id)
+      .map((r) => ({
+        name: r.players.name,
+        age: r.players.birthdate
+          ? (Date.now() - new Date(r.players.birthdate).getTime()) /
+            (365.25 * 24 * 3600 * 1000)
+          : null,
+        dpv: r.dpv,
+      }));
+
+    const tsRow = teamSeasonRes.data as
+      | {
+          season: number;
+          oline_composite_rank: number | null;
+          qb_tier: number | null;
+        }
+      | null;
+
+    const linkedAge = linkedPlayer.birthdate
+      ? (Date.now() - new Date(linkedPlayer.birthdate).getTime()) /
+        (365.25 * 24 * 3600 * 1000)
+      : null;
+
+    const input: LandingSpotInput = {
+      position: linkedPlayer.position,
+      team: linkedPlayer.current_team,
+      draftRound: linkedPlayer.draft_round ?? null,
+      draftYear: linkedPlayer.draft_year ?? null,
+      age: linkedAge,
+      teammates,
+      teamContext: tsRow
+        ? {
+            olineRank: tsRow.oline_composite_rank,
+            qbTier: tsRow.qb_tier,
+          }
+        : null,
+      // Pre-draft prospect just got a linked player record — by definition
+      // no qualifying season yet, so age + landing-spot bullets are on.
+      isRookieProfile: true,
+    };
+    landingBullets = analyzeLandingSpot(input);
+  }
 
   // Class-strength context — same class aggregate used on the trade calc.
   const { data: classRow } = await sb
@@ -233,6 +324,14 @@ export default async function ProspectPage({
             </table>
           </div>
         </div>
+      )}
+
+      {linkedPlayer && (
+        <LandingSpotCard
+          bullets={landingBullets}
+          team={landingTeam}
+          position={landingPosition}
+        />
       )}
 
       {combine && (
