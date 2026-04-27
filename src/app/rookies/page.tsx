@@ -3,6 +3,15 @@ import { createServerClient } from "@/lib/supabase/server";
 import { CURRENT_SEASON } from "@/lib/dpv/constants";
 import type { ScoringFormat } from "@/lib/dpv/types";
 import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
+import {
+  athleticismScoreFromMetrics,
+  fetchCombineDataset,
+  normalizeCombineName,
+} from "@/lib/combine/csv";
+import {
+  computeRookieTradeValue,
+  roundFromOverallPick,
+} from "@/lib/rookies/values";
 
 // /rookies — current draft class view. Shows prospect consensus rankings
 // pre-draft and overlays draft capital / team / combine / rookie prior DPV
@@ -69,6 +78,8 @@ export default async function RookiesPage({
     snapsRes,
     marketRes,
     sleeperTeams,
+    combineCsv,
+    teamSeasonRows,
   ] = await Promise.all([
     sb
       .from("prospect_consensus")
@@ -96,6 +107,16 @@ export default async function RookiesPage({
       .eq("scoring_format", fmt)
       .eq("source", "fantasycalc"),
     fetchSleeperTeams(),
+    // nflverse combine.csv — covers prospects who don't have a gsis_id yet
+    // (and therefore aren't in our combine_stats table). Used for the 40
+    // and pre-draft RAS-equivalent on this page.
+    fetchCombineDataset(),
+    // Per-team OL/QB context for the synthetic rookie prior. One pull,
+    // indexed by team for O(1) lookup per prospect.
+    sb
+      .from("team_seasons")
+      .select("team, season, oline_composite_rank, qb_tier")
+      .order("season", { ascending: false }),
   ]);
 
   if (prospectsRes.error) {
@@ -128,6 +149,25 @@ export default async function RookiesPage({
   for (const m of market) {
     const v = m.market_value_normalized;
     if (v !== null && v !== undefined) marketByPlayer.set(m.player_id, Number(v));
+  }
+
+  // Latest team_seasons row per team — drives the OL/QB-tier landing-spot
+  // multipliers inside the synthetic rookie prior.
+  const latestTeamCtx = new Map<
+    string,
+    { olineRank: number | null; qbTier: number | null }
+  >();
+  for (const row of (teamSeasonRows.data ?? []) as Array<{
+    team: string;
+    oline_composite_rank: number | null;
+    qb_tier: number | null;
+  }>) {
+    if (!latestTeamCtx.has(row.team)) {
+      latestTeamCtx.set(row.team, {
+        olineRank: row.oline_composite_rank,
+        qbTier: row.qb_tier,
+      });
+    }
   }
 
   // Per-position rank delta within (DPV ∩ Market). Identical signal to the
@@ -250,6 +290,67 @@ export default async function RookiesPage({
     const marketDelta = player
       ? deltaByPlayer.get(player.player_id) ?? null
       : null;
+
+    // Pre-draft fallbacks. When there's no players row yet:
+    //   - 40-yard dash comes from nflverse combine.csv (name-keyed).
+    //   - RAS-equivalent is computed inline from the same z-score / 0-10
+    //     formula used post-draft by scripts/ingest-combine.ts.
+    //   - DPV / Tier come from the synthetic rookie prior (same
+    //     computeRookieTradeValue used to make these prospects tradeable).
+    let forty: number | null =
+      c?.forty !== null && c?.forty !== undefined ? Number(c.forty) : null;
+    let ras: number | null =
+      c?.athleticism_score !== null && c?.athleticism_score !== undefined
+        ? Number(c.athleticism_score)
+        : null;
+    let dpv: number | null = s?.dpv ?? null;
+    let tier: string | null = s?.tier ?? null;
+
+    if (!player) {
+      const csvKey = normalizeCombineName(pr.name);
+      const csvRow = combineCsv.byName.get(csvKey);
+      if (csvRow) {
+        if (forty === null) forty = csvRow.forty;
+        if (ras === null) {
+          ras = athleticismScoreFromMetrics(
+            csvRow,
+            combineCsv.statsByPos.get(csvRow.position),
+          );
+        }
+      }
+      // Synthetic DPV — same engine as the trade calculator. Falls back
+      // automatically once compute-dpv produces a real prior post-publish.
+      if (dpv === null) {
+        const projectedRound =
+          pr.projected_round ??
+          roundFromOverallPick(pr.projected_overall_pick);
+        const teamCtx = team ? latestTeamCtx.get(team) ?? null : null;
+        const synth = position
+          ? computeRookieTradeValue({
+              prospect: {
+                prospectId: pr.prospect_id,
+                name: pr.name,
+                position,
+                projectedRound,
+                consensusGrade:
+                  pr.normalized_grade !== null
+                    ? Number(pr.normalized_grade)
+                    : null,
+                ageAtDraft: null,
+                draftYear: INCOMING_CLASS_YEAR,
+              },
+              team,
+              teamContext: teamCtx,
+              scoringFormat: fmt,
+            })
+          : null;
+        if (synth) {
+          dpv = synth.dpv;
+          tier = synth.tier;
+        }
+      }
+    }
+
     rows.push({
       key: pr.prospect_id,
       name: pr.name,
@@ -264,15 +365,12 @@ export default async function RookiesPage({
       team,
       teamSource,
       draftRound: player?.draft_round ?? null,
-      ras:
-        c?.athleticism_score !== null && c?.athleticism_score !== undefined
-          ? Number(c.athleticism_score)
-          : null,
-      forty: c?.forty !== null && c?.forty !== undefined ? Number(c.forty) : null,
-      dpv: s?.dpv ?? null,
+      ras,
+      forty,
+      dpv,
       market,
       marketDelta,
-      tier: s?.tier ?? null,
+      tier,
     });
   }
 
@@ -510,7 +608,21 @@ export default async function RookiesPage({
                     )}
                   </td>
                   <td className="px-3 py-2 text-center text-zinc-500 tabular-nums">
-                    {r.draftRound ? `R${r.draftRound}` : "—"}
+                    {r.draftRound ? (
+                      `R${r.draftRound}`
+                    ) : r.projectedRound ? (
+                      <span
+                        title="Projected round (pre-draft)"
+                        className="opacity-70"
+                      >
+                        R{r.projectedRound}
+                        <span className="text-[10px] ml-0.5 text-zinc-400">
+                          p
+                        </span>
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-500">
                     {r.consensusGrade !== null

@@ -8,6 +8,10 @@ import {
 } from "@/lib/dpv/landingSpot";
 import LandingSpotCard from "@/components/LandingSpotCard";
 import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
+import {
+  computeRookieTradeValue,
+  roundFromOverallPick,
+} from "@/lib/rookies/values";
 
 // /prospect/[id] — pre-draft prospect detail. Shows what we know before
 // the player has a gsis_id: cross-source consensus grade, per-source ranks,
@@ -205,6 +209,61 @@ export default async function ProspectPage({
     .eq("draft_year", prospect.draft_year)
     .maybeSingle();
 
+  // Synthetic rookie DPV — same prior used by the trade calculator. Replaces
+  // automatically once compute-dpv emits a real snapshot post-publish, at
+  // which point the value flows from `dpv_snapshots` instead. We surface it
+  // here so the prospect detail page mirrors what the trade calc shows.
+  let synthDPV: { dpv: number; tier: string } | null = null;
+  if (prospect.position) {
+    // If we have a team, grab its latest OL/QB-tier context for the prior.
+    // (Inside the landing-spot block above we already fetched a similar row,
+    // but it's scoped tightly. A second small query keeps this code path
+    // readable; team_seasons is small.)
+    let synthTeamCtx: {
+      olineRank: number | null;
+      qbTier: number | null;
+    } | null = null;
+    if (landingTeam) {
+      const { data: tsRow } = await sb
+        .from("team_seasons")
+        .select("oline_composite_rank, qb_tier")
+        .eq("team", landingTeam)
+        .order("season", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (tsRow) {
+        synthTeamCtx = {
+          olineRank: tsRow.oline_composite_rank,
+          qbTier: tsRow.qb_tier,
+        };
+      }
+    }
+    const projectedRound =
+      prospect.projected_round ??
+      roundFromOverallPick(prospect.projected_overall_pick);
+    const synth = computeRookieTradeValue({
+      prospect: {
+        prospectId: prospect.prospect_id,
+        name: prospect.name,
+        position: prospect.position,
+        projectedRound,
+        consensusGrade:
+          prospect.normalized_grade !== null
+            ? Number(prospect.normalized_grade)
+            : null,
+        ageAtDraft: null,
+        draftYear: prospect.draft_year,
+      },
+      team: landingTeam,
+      teamContext: synthTeamCtx,
+      // /rookies + /trade default to HALF_PPR when no league is selected;
+      // mirror that here so the number on this page matches the search row
+      // a user just clicked through from.
+      scoringFormat: "HALF_PPR",
+    });
+    if (synth) synthDPV = { dpv: synth.dpv, tier: synth.tier };
+  }
+
   const grade =
     prospect.normalized_grade !== null
       ? Number(prospect.normalized_grade)
@@ -299,6 +358,47 @@ export default async function ProspectPage({
           </div>
         </div>
       </div>
+
+      {synthDPV && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <div className="rounded-md border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 p-5">
+            <div className="text-xs uppercase tracking-wider text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+              Pre-Draft DPV
+              <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded">
+                Projected
+              </span>
+            </div>
+            <div className="text-4xl font-bold tabular-nums mt-1 text-emerald-900 dark:text-emerald-100">
+              {synthDPV.dpv.toLocaleString()}
+            </div>
+            <div className="text-sm text-emerald-800/80 dark:text-emerald-200/80 mt-1">
+              {synthDPV.tier}
+              {landingTeam ? ` · ${landingTeam}` : " · no team yet"}
+            </div>
+            <div className="text-xs text-zinc-500 mt-2 leading-snug">
+              Same engine that prices this prospect in the{" "}
+              <Link href="/trade" className="underline">
+                trade calculator
+              </Link>
+              . Replaces with a real rookie-prior DPV once the player record
+              + draft capital land (typically 1-3 days post-draft).
+            </div>
+          </div>
+          <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+            <div className="text-xs uppercase tracking-wider text-zinc-500">
+              Market Value
+            </div>
+            <div className="text-4xl font-bold tabular-nums mt-1 text-zinc-400">
+              —
+            </div>
+            <div className="text-sm text-zinc-500 mt-1">
+              Pre-draft prospects don&apos;t have a FantasyCalc price yet.
+              Buy/Sell signals appear on the rookies + trade pages once the
+              market value lands.
+            </div>
+          </div>
+        </div>
+      )}
 
       {sources.length > 0 && (
         <div className="mb-8">

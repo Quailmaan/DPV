@@ -92,8 +92,17 @@ create table if not exists public.leagues (
   total_rosters int,
   scoring_format text check (scoring_format in ('STANDARD','HALF_PPR','FULL_PPR')),
   raw_settings jsonb,
+  -- Sleeper-style roster slot list (e.g. ["QB","RB","RB","WR","WR","WR","TE",
+  -- "FLEX","SUPER_FLEX","BN",...]). Drives league-aware position scarcity in
+  -- the trade calculator: SF leagues raise QB scarcity, deep-flex leagues
+  -- raise RB/WR scarcity. Null until first sync after column was added; the
+  -- trade page falls back to a standard 12-team 1-QB build when missing.
+  roster_positions text[],
   synced_at timestamptz not null default now()
 );
+
+alter table public.leagues
+  add column if not exists roster_positions text[];
 
 create table if not exists public.league_rosters (
   league_id text not null references public.leagues(league_id) on delete cascade,

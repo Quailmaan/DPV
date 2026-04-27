@@ -20,6 +20,10 @@ type SleeperLeague = {
   total_rosters: number;
   scoring_settings?: Record<string, number>;
   settings?: Record<string, number>;
+  // Slot list, e.g. ["QB","RB","RB","WR","WR","WR","TE","FLEX","SUPER_FLEX",
+  // "BN","BN",...]. We persist this so the trade calculator can shape
+  // position scarcity per league (SF inflates QB, 3WR/2RB+FLEX inflates skill).
+  roster_positions?: string[];
 };
 
 type SleeperUser = {
@@ -182,6 +186,7 @@ export async function syncSleeperLeague(
         total_rosters: league.total_rosters,
         scoring_format: format,
         raw_settings: league.settings ?? null,
+        roster_positions: league.roster_positions ?? null,
         synced_at: new Date().toISOString(),
       },
       { onConflict: "league_id" },

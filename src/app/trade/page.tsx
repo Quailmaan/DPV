@@ -8,6 +8,7 @@ import {
   type RookieValueInput,
 } from "@/lib/rookies/values";
 import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
+import { leagueReplacementDPV } from "@/lib/dpv/scarcity";
 import TradeCalculator, {
   type TradePlayer,
   type LeagueRosterOption,
@@ -49,6 +50,10 @@ export default async function TradePage({
   let fmt: ScoringFormat = isScoringFormat(sp.fmt) ? sp.fmt : "HALF_PPR";
   let leagueName: string | null = null;
   let rosterOptions: LeagueRosterOption[] = [];
+  // Construction shapes the trade verdict — SF leagues weight QBs harder,
+  // 2RB+FLEX leagues weight RBs harder. Captured from Sleeper at sync time.
+  let leagueRosterPositions: string[] | null = null;
+  let leagueTotalRosters: number | null = null;
 
   if (requestedLeague) {
     const [leagueRes, rostersRes] = await Promise.all([
@@ -66,6 +71,14 @@ export default async function TradePage({
       // League format overrides search param so trade uses the right scoring.
       if (isScoringFormat(leagueRes.data.scoring_format)) {
         fmt = leagueRes.data.scoring_format;
+      }
+      // roster_positions is null for leagues synced before the column was
+      // added — they fall back to the standard 12-team build downstream.
+      if (Array.isArray(leagueRes.data.roster_positions)) {
+        leagueRosterPositions = leagueRes.data.roster_positions as string[];
+      }
+      if (typeof leagueRes.data.total_rosters === "number") {
+        leagueTotalRosters = leagueRes.data.total_rosters;
       }
     }
     rosterOptions = ((rostersRes.data ?? []) as Array<{
@@ -311,6 +324,18 @@ export default async function TradePage({
     ...generatePickPlayers(new Date(), classOverrides),
   ].sort((a, b) => b.dpv - a.dpv);
 
+  // League-aware position scarcity. Replacement cliff is computed from the
+  // *NFL pool only* (synthetic rookies + picks would distort the cliff for
+  // a position that hasn't seen rookies grade out yet). Default 12-team
+  // 1-QB build kicks in when no league is selected or pre-roster_positions
+  // sync.
+  const { replacement, teamCount, isDefault: isDefaultConstruction } =
+    leagueReplacementDPV(
+      nflPlayers,
+      leagueRosterPositions,
+      leagueTotalRosters,
+    );
+
   const fromId = fromRosterId ? Number(fromRosterId) : null;
 
   return (
@@ -338,6 +363,12 @@ export default async function TradePage({
         leagueId={requestedLeague}
         rosterOptions={rosterOptions}
         defaultFromRosterId={fromId && Number.isFinite(fromId) ? fromId : null}
+        replacement={replacement}
+        replacementContext={{
+          teamCount,
+          rosterPositions: leagueRosterPositions,
+          isDefault: isDefaultConstruction,
+        }}
       />
     </div>
   );

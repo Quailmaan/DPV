@@ -124,3 +124,130 @@ export async function fetchCombineMetrics(
     return null;
   }
 }
+
+// ── Bulk variant + RAS-equivalent score ────────────────────────────────────
+//
+// /rookies needs combine metrics for every prospect in one shot, plus a
+// 0-10 athleticism score for the RAS column. Calling fetchCombineMetrics
+// per-prospect would re-parse the CSV each time (Next caches the *fetch*,
+// not the parse). This variant returns the parsed rows + per-position
+// stats so the page can both (a) look up by name and (b) compute the
+// athleticism score inline using the same formula as scripts/ingest-combine.
+
+export type PositionStats = {
+  forty: { mean: number; sd: number };
+  bench: { mean: number; sd: number };
+  vertical: { mean: number; sd: number };
+  broad_jump: { mean: number; sd: number };
+  cone: { mean: number; sd: number };
+  shuttle: { mean: number; sd: number };
+};
+
+function computePositionStats(
+  rows: CombineMetrics[],
+): Map<string, PositionStats> {
+  const byPos = new Map<string, CombineMetrics[]>();
+  for (const r of rows) {
+    const arr = byPos.get(r.position) ?? [];
+    arr.push(r);
+    byPos.set(r.position, arr);
+  }
+  const result = new Map<string, PositionStats>();
+  const stat = (arr: CombineMetrics[], key: keyof CombineMetrics) => {
+    const vals = arr
+      .map((r) => r[key])
+      .filter((v): v is number => typeof v === "number");
+    if (vals.length === 0) return { mean: 0, sd: 0 };
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const variance =
+      vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
+    return { mean, sd: Math.sqrt(variance) };
+  };
+  for (const [pos, arr] of byPos) {
+    result.set(pos, {
+      forty: stat(arr, "forty"),
+      bench: stat(arr, "bench"),
+      vertical: stat(arr, "vertical"),
+      broad_jump: stat(arr, "broad_jump"),
+      cone: stat(arr, "cone"),
+      shuttle: stat(arr, "shuttle"),
+    });
+  }
+  return result;
+}
+
+// Standard-normal CDF approximation. Maps a z-score to a 0-10 bucket where
+// 5.0 = 50th percentile. Mirrors zToTen in scripts/ingest-combine.ts so the
+// pre-draft score on /rookies lines up with the post-draft RAS in
+// combine_stats once the player is ingested.
+function zToTen(z: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp(-(z * z) / 2);
+  const p =
+    d *
+    t *
+    (0.3193815 +
+      t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  const phi = z > 0 ? 1 - p : p;
+  return Math.round(phi * 1000) / 100;
+}
+
+function dirZ(
+  value: number | null,
+  mean: number,
+  sd: number,
+  lowerIsBetter: boolean,
+): number | null {
+  if (value === null || sd === 0) return null;
+  const z = (value - mean) / sd;
+  return lowerIsBetter ? -z : z;
+}
+
+/** RAS-equivalent 0-10 score from a single combine row + position stats.
+ *  Returns null if the row has no usable metrics. */
+export function athleticismScoreFromMetrics(
+  row: CombineMetrics,
+  stats: PositionStats | undefined,
+): number | null {
+  if (!stats) return null;
+  const parts: number[] = [];
+  const add = (z: number | null) => {
+    if (z !== null && Number.isFinite(z)) parts.push(z);
+  };
+  add(dirZ(row.forty, stats.forty.mean, stats.forty.sd, true));
+  add(dirZ(row.vertical, stats.vertical.mean, stats.vertical.sd, false));
+  add(dirZ(row.broad_jump, stats.broad_jump.mean, stats.broad_jump.sd, false));
+  add(dirZ(row.bench, stats.bench.mean, stats.bench.sd, false));
+  add(dirZ(row.cone, stats.cone.mean, stats.cone.sd, true));
+  add(dirZ(row.shuttle, stats.shuttle.mean, stats.shuttle.sd, true));
+  if (parts.length === 0) return null;
+  const avgZ = parts.reduce((a, b) => a + b, 0) / parts.length;
+  return zToTen(avgZ);
+}
+
+export type CombineDataset = {
+  /** name key (`normalizeCombineName(name)`) → most recent CombineMetrics row.
+   *  When a prospect attended in multiple years (rare but possible), we keep
+   *  the latest season — that's the row most predictive of how they trained. */
+  byName: Map<string, CombineMetrics>;
+  statsByPos: Map<string, PositionStats>;
+};
+
+/** Fetch + parse combine.csv once, return the full dataset for bulk use. */
+export async function fetchCombineDataset(): Promise<CombineDataset> {
+  try {
+    const res = await fetch(COMBINE_URL, { next: { revalidate: 3600 } });
+    if (!res.ok) return { byName: new Map(), statsByPos: new Map() };
+    const text = await res.text();
+    const rows = parseCombineCsv(text);
+    const byName = new Map<string, CombineMetrics>();
+    for (const r of rows) {
+      const key = normalizeCombineName(r.player_name);
+      const prev = byName.get(key);
+      if (!prev || r.season > prev.season) byName.set(key, r);
+    }
+    return { byName, statsByPos: computePositionStats(rows) };
+  } catch {
+    return { byName: new Map(), statsByPos: new Map() };
+  }
+}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { ScoringFormat } from "@/lib/dpv/types";
+import type { ReplacementByPosition } from "@/lib/dpv/scarcity";
 
 export type TradePlayer = {
   id: string;
@@ -42,18 +43,21 @@ const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: "FULL_PPR", label: "Full PPR" },
 ];
 
-// Rough replacement-level DPV per position. Trading 2 mid-tier RBs for 1 RB1
-// isn't equal-value even if the sums match — elite starters are scarcer.
-// Multiply "value above replacement" instead of raw DPV to account for this.
-const REPLACEMENT: Record<string, number> = {
-  QB: 4500,
-  RB: 3500,
-  WR: 3500,
-  TE: 3000,
-};
-
-function valueAboveReplacement(p: TradePlayer): number {
-  const repl = REPLACEMENT[p.position] ?? 3500;
+// Replacement DPV is now league-aware — passed down from the server based
+// on the selected league's roster_positions (or a 12-team 1-QB default).
+// SF leagues raise QB scarcity, deep-flex leagues raise RB/WR scarcity.
+// See src/lib/dpv/scarcity.ts for the math.
+function valueAboveReplacement(
+  p: TradePlayer,
+  replacement: ReplacementByPosition,
+): number {
+  const repl =
+    p.position === "QB" ||
+    p.position === "RB" ||
+    p.position === "WR" ||
+    p.position === "TE"
+      ? replacement[p.position]
+      : 0; // PICK / unsupported positions: no replacement floor
   return Math.max(0, p.dpv - repl);
 }
 
@@ -74,7 +78,10 @@ const BUY_SELL_CLASS: Record<"buy" | "sell", string> = {
   sell: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
 };
 
-function sideValue(side: TradePlayer[]): {
+function sideValue(
+  side: TradePlayer[],
+  replacement: ReplacementByPosition,
+): {
   dpv: number;
   market: number;
   var_: number;
@@ -82,7 +89,10 @@ function sideValue(side: TradePlayer[]): {
 } {
   const dpv = side.reduce((a, b) => a + b.dpv, 0);
   const market = side.reduce((a, b) => a + b.market, 0);
-  const var_ = side.reduce((a, b) => a + valueAboveReplacement(b), 0);
+  const var_ = side.reduce(
+    (a, b) => a + valueAboveReplacement(b, replacement),
+    0,
+  );
   const ages = side.map((p) => p.age).filter((x): x is number => x !== null);
   const avgAge = ages.length
     ? ages.reduce((a, b) => a + b, 0) / ages.length
@@ -125,16 +135,24 @@ function ageNoteFor(g: ReturnType<typeof sideValue>, r: ReturnType<typeof sideVa
 function verdictFor(
   giving: TradePlayer[],
   getting: TradePlayer[],
+  replacement: ReplacementByPosition,
 ): Verdict | null {
   if (giving.length === 0 || getting.length === 0) return null;
-  const g = sideValue(giving);
-  const r = sideValue(getting);
+  const g = sideValue(giving, replacement);
+  const r = sideValue(getting, replacement);
 
-  // Symmetric percent diff so a 7,000 → 8,000 swing reads the same on both
-  // axes regardless of absolute scale (DPV vs FantasyCalc are different
-  // ranges). Each axis gets its own pct so they're directly comparable.
-  const dpvDenom = Math.max(g.dpv, r.dpv, 1);
-  const dpvPct = (r.dpv - g.dpv) / dpvDenom;
+  // Production axis runs on VAR (value above replacement) instead of raw
+  // DPV — that's how league construction enters the math. Two players with
+  // identical DPV at different positions can have very different VAR: a
+  // 9000-DPV TE in a 1-TE league has way more VAR than a 9000-DPV QB in a
+  // 1-QB league because the QB cliff sits at ~7500 while the TE cliff sits
+  // at ~3000. Trading the QB for the TE is a real win even though raw DPV
+  // looks even.
+  //
+  // Floor at 1 to keep symmetric percent diff well-defined when both sides
+  // are sub-replacement (e.g. picks-only trades).
+  const dpvDenom = Math.max(g.var_, r.var_, 1);
+  const dpvPct = (r.var_ - g.var_) / dpvDenom;
 
   const mktDenom = Math.max(g.market, r.market, 1);
   const marketPct = (r.market - g.market) / mktDenom;
@@ -292,12 +310,22 @@ export default function TradeCalculator({
   leagueId,
   rosterOptions,
   defaultFromRosterId,
+  replacement,
+  replacementContext,
 }: {
   players: TradePlayer[];
   fmt: ScoringFormat;
   leagueId: string | null;
   rosterOptions: LeagueRosterOption[];
   defaultFromRosterId: number | null;
+  /** League-aware replacement DPV per position. Drives VAR + verdict. */
+  replacement: ReplacementByPosition;
+  /** Metadata for the scarcity tooltip — explains where the cliff came from. */
+  replacementContext: {
+    teamCount: number;
+    rosterPositions: string[] | null;
+    isDefault: boolean;
+  };
 }) {
   const [giving, setGiving] = useState<TradePlayer[]>([]);
   const [getting, setGetting] = useState<TradePlayer[]>([]);
@@ -328,9 +356,9 @@ export default function TradeCalculator({
     return r ? new Set(r.playerIds) : null;
   }, [toRoster, rosterOptions]);
 
-  const verdict = verdictFor(giving, getting);
-  const g = sideValue(giving);
-  const r = sideValue(getting);
+  const verdict = verdictFor(giving, getting, replacement);
+  const g = sideValue(giving, replacement);
+  const r = sideValue(getting, replacement);
 
   const leagueMode = leagueId !== null && rosterOptions.length > 0;
 
@@ -380,6 +408,14 @@ export default function TradeCalculator({
           </button>
         )}
       </div>
+
+      <ScarcityPanel
+        replacement={replacement}
+        teamCount={replacementContext.teamCount}
+        rosterPositions={replacementContext.rosterPositions}
+        isDefault={replacementContext.isDefault}
+        leagueName={null}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <TradeSide
@@ -596,16 +632,25 @@ function TradeSide({
               className="flex items-center justify-between gap-3 py-2"
             >
               <div className="flex items-center gap-2 min-w-0">
-                {isPick ? (
-                  <span className="font-medium truncate">{p.name}</span>
-                ) : (
-                  <Link
-                    href={`/player/${p.id}`}
-                    className="font-medium hover:underline truncate"
-                  >
-                    {p.name}
-                  </Link>
-                )}
+                {(() => {
+                  if (isPick) {
+                    return <span className="font-medium truncate">{p.name}</span>;
+                  }
+                  // Synthetic rookies use ID prefix `rookie:<prospect_id>` and
+                  // don't have a /player/[id] page yet — link them to the
+                  // prospect detail. Real player IDs go to /player/[id].
+                  const href = p.id.startsWith("rookie:")
+                    ? `/prospect/${p.id.slice("rookie:".length)}`
+                    : `/player/${p.id}`;
+                  return (
+                    <Link
+                      href={href}
+                      className="font-medium hover:underline truncate"
+                    >
+                      {p.name}
+                    </Link>
+                  );
+                })()}
                 <span
                   className={`text-xs rounded px-1.5 py-0.5 font-mono flex-shrink-0 ${
                     isPick
@@ -730,11 +775,18 @@ function VerdictCard({
             Δ
           </div>
 
-          <div className="font-medium">DPV (production)</div>
-          <div>{Math.round(giving.dpv).toLocaleString()}</div>
-          <div>{Math.round(getting.dpv).toLocaleString()}</div>
+          <div className="font-medium">VAR (scarcity-adjusted)</div>
+          <div>{Math.round(giving.var_).toLocaleString()}</div>
+          <div>{Math.round(getting.var_).toLocaleString()}</div>
           <div className={`text-right font-semibold ${pctColor(verdict.dpvPct)}`}>
-            {fmtDelta(dpvDelta)} · {fmtPct(verdict.dpvPct)}
+            {fmtDelta(getting.var_ - giving.var_)} · {fmtPct(verdict.dpvPct)}
+          </div>
+
+          <div className="font-medium opacity-70">DPV (raw)</div>
+          <div className="opacity-70">{Math.round(giving.dpv).toLocaleString()}</div>
+          <div className="opacity-70">{Math.round(getting.dpv).toLocaleString()}</div>
+          <div className="text-right opacity-70">
+            {fmtDelta(dpvDelta)}
           </div>
 
           {showMarketAxis ? (
@@ -761,6 +813,74 @@ function VerdictCard({
       </div>
 
       <div className="text-sm">{verdict.explanation}</div>
+    </div>
+  );
+}
+
+// Scarcity panel — surfaces the replacement cliff used by the verdict so a
+// user can see *why* the same DPV totals at different positions read
+// differently. Especially relevant for SF / 2QB leagues where QB scarcity
+// shifts dramatically vs. 1-QB defaults.
+function ScarcityPanel({
+  replacement,
+  teamCount,
+  rosterPositions,
+  isDefault,
+}: {
+  replacement: ReplacementByPosition;
+  teamCount: number;
+  rosterPositions: string[] | null;
+  isDefault: boolean;
+  leagueName: string | null;
+}) {
+  // Surface SF/2QB explicitly — that's the single biggest construction
+  // signal that flips trade outcomes vs. a default 1-QB build.
+  const isSuperFlex = (rosterPositions ?? []).some(
+    (s) => s.toUpperCase() === "SUPER_FLEX" || s.toUpperCase() === "QB_WR_RB_TE",
+  );
+  const qbStarters = (rosterPositions ?? []).filter(
+    (s) => s.toUpperCase() === "QB",
+  ).length;
+
+  let constructionLabel: string;
+  if (isDefault) {
+    constructionLabel = "Standard 12-team 1-QB (default — no league selected)";
+  } else if (isSuperFlex) {
+    constructionLabel = `${teamCount}-team Super-Flex`;
+  } else if (qbStarters >= 2) {
+    constructionLabel = `${teamCount}-team ${qbStarters}-QB`;
+  } else {
+    constructionLabel = `${teamCount}-team 1-QB`;
+  }
+
+  return (
+    <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60 p-3 mb-4">
+      <div className="flex items-baseline justify-between flex-wrap gap-2 mb-2">
+        <div className="text-xs uppercase tracking-wider font-semibold text-zinc-600 dark:text-zinc-400">
+          Position scarcity (replacement cliff)
+        </div>
+        <div className="text-xs text-zinc-500">{constructionLabel}</div>
+      </div>
+      <div className="grid grid-cols-4 gap-2 text-sm tabular-nums">
+        {(["QB", "RB", "WR", "TE"] as const).map((pos) => (
+          <div
+            key={pos}
+            className="rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1.5"
+          >
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+              {pos} repl.
+            </div>
+            <div className="font-semibold">
+              {replacement[pos].toLocaleString()}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="text-[11px] text-zinc-500 mt-2 leading-snug">
+        Verdict math is on VAR (DPV minus the replacement cliff at each
+        position). A 9000-DPV TE in a 1-TE league trades for more than a
+        9000-DPV QB in a 1-QB league because the TE cliff sits much lower.
+      </div>
     </div>
   );
 }
