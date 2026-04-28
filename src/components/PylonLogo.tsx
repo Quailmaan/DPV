@@ -1,111 +1,84 @@
-import type { SVGProps } from "react";
+// Pylon brand assets. The brand is wordmark-only — no separate glyph or
+// pictographic image. The Y in PYLON is rendered in brand orange and that
+// single accent letter carries the visual identity. The Y also doubles as
+// a goalpost-shaped mark, so it works as a standalone monogram (favicon,
+// app icon, social avatar) without needing a separate image asset.
 
-// Pylon glyph — stylized NFL goal-line pylon. Tall narrow trapezoid (slightly
-// wider at base) with a single horizontal accent stripe near the top, the
-// way real pylons have a reflective band. Uses currentColor so the pylon
-// inherits brand color from CSS — easy theming.
-//
-// Aspect: 12:36 = 1:3. Real pylons are ~4.5:1 (needle-like); 1:3 is the
-// right iconic abstraction for a logo at all sizes including 16px favicon.
-export function PylonGlyph({
-  size = 32,
-  stripe = true,
-  ...props
-}: { size?: number; stripe?: boolean } & SVGProps<SVGSVGElement>) {
-  const height = (size * 36) / 12;
-  return (
-    <svg
-      width={size}
-      height={height}
-      viewBox="0 0 12 36"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      {...props}
-    >
-      <path d="M 3 2 L 9 2 L 10 34 L 2 34 Z" fill="currentColor" />
-      {stripe && (
-        <rect
-          x="3"
-          y="6"
-          width="6"
-          height="1.5"
-          fill="white"
-          fillOpacity="0.92"
-        />
-      )}
-    </svg>
-  );
-}
-
-type Variant = "default" | "accent" | "stacked";
 type Size = "sm" | "md" | "lg" | "xl";
 
-const SIZE_PX: Record<Size, { glyph: number; textPx: number; gap: number }> = {
-  sm: { glyph: 14, textPx: 14, gap: 6 },
-  md: { glyph: 22, textPx: 22, gap: 8 },
-  lg: { glyph: 36, textPx: 36, gap: 12 },
-  xl: { glyph: 64, textPx: 56, gap: 18 },
+const SIZE_PX: Record<Size, number> = {
+  sm: 14,
+  md: 22,
+  lg: 36,
+  xl: 56,
 };
 
-// PylonWordmark — three variants:
-//   default : pylon glyph beside PYLON wordmark (most flexible, most legible)
-//   accent  : wordmark only, with the Y rendered in brand orange
-//   stacked : glyph above wordmark (square avatar shape)
+// Wordmark — P + (orange Y) + LON. Single source of truth for how the
+// name renders across the site.
 export function PylonWordmark({
-  variant = "default",
   size = "md",
   className = "",
 }: {
-  variant?: Variant;
   size?: Size;
   className?: string;
 }) {
-  const s = SIZE_PX[size];
-  if (variant === "stacked") {
+  const px = SIZE_PX[size];
+  return (
+    <span
+      className={`font-bold tracking-tight leading-none ${className}`}
+      style={{ fontSize: px }}
+    >
+      P
+      <span className="text-orange-600 dark:text-orange-500">Y</span>
+      LON
+    </span>
+  );
+}
+
+// PylonMark — the standalone Y monogram. Used wherever the wordmark won't
+// fit (favicon, app icon, social avatar). Two modes:
+//   filled=false : bold orange Y on transparent background
+//   filled=true  : white Y on orange-filled rounded square (app-icon style)
+export function PylonMark({
+  size = 32,
+  filled = false,
+  dark = false,
+  className = "",
+}: {
+  size?: number;
+  filled?: boolean;
+  dark?: boolean;
+  className?: string;
+}) {
+  if (filled) {
     return (
       <span
-        className={`inline-flex flex-col items-center ${className}`}
-        style={{ gap: s.gap }}
+        className={`inline-flex items-center justify-center rounded-md bg-orange-600 ${className}`}
+        style={{ width: size, height: size }}
+        aria-hidden="true"
       >
-        <PylonGlyph
-          size={s.glyph * 1.4}
-          className="text-orange-600 dark:text-orange-500"
-        />
         <span
-          className="font-bold tracking-tight leading-none"
-          style={{ fontSize: s.textPx * 0.7 }}
+          className="font-black tracking-tight leading-none text-white"
+          style={{ fontSize: size * 0.68 }}
         >
-          PYLON
+          Y
         </span>
-      </span>
-    );
-  }
-  if (variant === "accent") {
-    return (
-      <span
-        className={`font-bold tracking-tight leading-none ${className}`}
-        style={{ fontSize: s.textPx }}
-      >
-        P
-        <span className="text-orange-600 dark:text-orange-500">Y</span>
-        LON
       </span>
     );
   }
   return (
     <span
-      className={`inline-flex items-center ${className}`}
-      style={{ gap: s.gap }}
+      className={`inline-flex items-center justify-center rounded-md ${
+        dark ? "bg-zinc-900" : ""
+      } ${className}`}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
     >
-      <PylonGlyph
-        size={s.glyph}
-        className="text-orange-600 dark:text-orange-500"
-      />
       <span
-        className="font-bold tracking-tight leading-none"
-        style={{ fontSize: s.textPx }}
+        className="font-black tracking-tight leading-none text-orange-600 dark:text-orange-500"
+        style={{ fontSize: size * 0.78 }}
       >
-        PYLON
+        Y
       </span>
     </span>
   );
