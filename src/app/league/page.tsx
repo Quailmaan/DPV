@@ -51,6 +51,25 @@ export default async function LeaguesPage() {
 
   const atCap = leagues.length >= MAX_LEAGUES_PER_USER;
 
+  // Relative time formatter for the "Last Sync" column. Same-day formats
+  // ("just now", "5 mins ago") so users see immediate feedback after
+  // hitting Re-sync — the previous toLocaleDateString call only changed
+  // when the calendar day rolled over.
+  function formatRelative(iso: string): string {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 0) return "just now";
+    const sec = Math.floor(ms / 1000);
+    if (sec < 30) return "just now";
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} min${min === 1 ? "" : "s"} ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr} hr${hr === 1 ? "" : "s"} ago`;
+    const day = Math.floor(hr / 24);
+    if (day < 7) return `${day} day${day === 1 ? "" : "s"} ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-baseline justify-between gap-3 flex-wrap">
@@ -119,8 +138,11 @@ export default async function LeaguesPage() {
                   <td className="px-4 py-2 text-right tabular-nums">
                     {l.total_rosters}
                   </td>
-                  <td className="px-4 py-2 text-right text-zinc-500 tabular-nums">
-                    {new Date(l.synced_at).toLocaleDateString()}
+                  <td
+                    className="px-4 py-2 text-right text-zinc-500 tabular-nums"
+                    title={new Date(l.synced_at).toLocaleString()}
+                  >
+                    {formatRelative(l.synced_at)}
                   </td>
                   <td className="px-4 py-2 text-right">
                     <div className="flex items-center justify-end gap-3">
