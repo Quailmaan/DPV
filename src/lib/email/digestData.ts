@@ -239,6 +239,25 @@ async function loadOneLeague(
     } => x !== null);
   const marketDeltaMap = buildMarketDeltaMap(marketDeltaInput);
 
+  // Scale FantasyCalc market values to the DPV magnitude so the trade
+  // finder can blend them with PYV. Same global mean-anchoring used on
+  // the league page — keeps the digest's trade ideas in lockstep with
+  // what the user sees on /league/[id].
+  const scaledMarketByPid = new Map<string, number>();
+  {
+    let dpvSum = 0;
+    let mktSum = 0;
+    for (const s of marketDeltaInput) {
+      if (s.market === null) continue;
+      dpvSum += s.dpv;
+      mktSum += s.market;
+    }
+    const k = mktSum > 0 ? dpvSum / mktSum : 1;
+    for (const [pid, mv] of marketByPid.entries()) {
+      scaledMarketByPid.set(pid, mv * k);
+    }
+  }
+
   // Per-player sell-window for every rostered player (across the whole
   // league — trade finder needs them too).
   const sellWindowByPlayer = new Map<string, SellWindow | null>();
@@ -308,6 +327,22 @@ async function loadOneLeague(
   leaguePosAvg.WR /= nRosters;
   leaguePosAvg.TE /= nRosters;
 
+  // Approximate NFL years played from birthdate. Drives the PYV/market
+  // blend in the trade finder — see league page for the same helper /
+  // rationale (kept duplicated rather than extracted because the helper
+  // is one-liner and the surface area is tiny).
+  function approxYearsPro(
+    birthdate: string | null,
+    position: TradePosition,
+  ): number {
+    if (!birthdate) return 3;
+    const age =
+      (Date.now() - new Date(birthdate).getTime()) /
+      (365.25 * 24 * 3600 * 1000);
+    const baseAge = position === "QB" ? 23 : 22;
+    return Math.max(0, Math.floor(age - baseAge));
+  }
+
   // Build TradeFinderTeam shape per roster.
   function buildTradeFinderTeam(roster: RosterRow): TradeFinderTeam {
     const summary = summaries.find((s) => s.rosterId === roster.roster_id);
@@ -319,11 +354,14 @@ async function loadOneLeague(
       if (pos !== "QB" && pos !== "RB" && pos !== "WR" && pos !== "TE") {
         continue;
       }
+      const tp = pos as TradePosition;
       players.push({
         playerId: pid,
         name: s.players.name,
-        position: pos as TradePosition,
+        position: tp,
         dpv: Number(s.dpv),
+        marketValue: scaledMarketByPid.get(pid) ?? null,
+        yearsPro: approxYearsPro(s.players.birthdate, tp),
         sellWindow: sellWindowByPlayer.get(pid) ?? null,
       });
     }

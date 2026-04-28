@@ -193,6 +193,28 @@ export default async function LeagueDetailPage({
     } => x !== null);
   const marketDeltaMap = buildMarketDeltaMap(marketDeltaInput);
 
+  // Scale FantasyCalc market values to the DPV magnitude so the trade
+  // finder can blend them with PYV directly. We compute a single global
+  // scale factor — sum of DPVs over the intersection / sum of markets
+  // over the intersection — and apply it to every market value. A
+  // global linear scale keeps cross-position comparability (PYV is
+  // already cross-position-comparable; this just brings market onto
+  // the same scale).
+  const scaledMarketByPid = new Map<string, number>();
+  {
+    let dpvSum = 0;
+    let mktSum = 0;
+    for (const s of marketDeltaInput) {
+      if (s.market === null) continue;
+      dpvSum += s.dpv;
+      mktSum += s.market;
+    }
+    const k = mktSum > 0 ? dpvSum / mktSum : 1;
+    for (const [pid, mv] of marketByPid.entries()) {
+      scaledMarketByPid.set(pid, mv * k);
+    }
+  }
+
   // Sell-window per rostered player. Computed once, reused by the
   // focused-team table column AND the trade finder. Rostered-only —
   // there's no point computing for free agents here (the FA list
@@ -309,6 +331,24 @@ export default async function LeagueDetailPage({
     ? rosters.find((r) => r.roster_id === focusedTeam.rosterId) ?? null
     : null;
 
+  // Approximate NFL years played from birthdate. We don't have a
+  // seasons-played column on the page query and querying player_seasons
+  // for every rostered player would be heavyweight; an age-based proxy
+  // is good enough because the blend weight only needs to roughly
+  // reflect "rookie / sophomore / vet" anyway. QBs typically enter at
+  // 23, skill players at 22 — that offset is the only positional split.
+  function approxYearsPro(
+    birthdate: string | null,
+    position: TradePosition,
+  ): number {
+    if (!birthdate) return 3;
+    const age =
+      (Date.now() - new Date(birthdate).getTime()) /
+      (365.25 * 24 * 3600 * 1000);
+    const baseAge = position === "QB" ? 23 : 22;
+    return Math.max(0, Math.floor(age - baseAge));
+  }
+
   // Trade finder — build TradeFinderTeam shape per roster from data
   // we already have, then ask the pure helper for top ideas. Computed
   // only when a team is focused (it's the entry point to the section).
@@ -325,11 +365,14 @@ export default async function LeagueDetailPage({
       if (!s || !s.players) continue;
       const pos = s.players.position;
       if (pos !== "QB" && pos !== "RB" && pos !== "WR" && pos !== "TE") continue;
+      const tp = pos as TradePosition;
       players.push({
         playerId: pid,
         name: s.players.name,
-        position: pos as TradePosition,
+        position: tp,
         dpv: Number(s.dpv),
+        marketValue: scaledMarketByPid.get(pid) ?? null,
+        yearsPro: approxYearsPro(s.players.birthdate, tp),
         sellWindow: sellWindowByPlayer.get(pid) ?? null,
       });
     }
@@ -786,7 +829,10 @@ export default async function LeagueDetailPage({
 
 // One trade idea — `give → receive` with rationale and a quick link to
 // the trade calculator pre-loaded with both sides. Score and DPV delta
-// are surfaced so the user can size the deal at a glance.
+// are surfaced so the user can size the deal at a glance. The market
+// alignment tag tells the user whether FantasyCalc backs or rejects
+// the PYV-suggested trade — both view types are useful (PYV catches
+// trades market hasn't priced in yet; market reality-checks PYV).
 function TradeIdeaCard({
   leagueId,
   fromRosterId,
@@ -806,6 +852,7 @@ function TradeIdeaCard({
     partnerName: string;
     partnerTeamName: string | null;
     myDpvDelta: number;
+    marketAlignment: "ok" | "disagree" | "none";
     rationale: string;
   };
 }) {
@@ -830,13 +877,16 @@ function TradeIdeaCard({
     `&receive=${encodeURIComponent(idea.receive.playerId)}`;
   return (
     <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-      <div className="flex items-baseline justify-between mb-1">
-        <div className="text-xs uppercase tracking-wider text-zinc-500">
+      <div className="flex items-baseline justify-between mb-1 gap-2">
+        <div className="text-xs uppercase tracking-wider text-zinc-500 truncate">
           With {idea.partnerName}
           {idea.partnerTeamName ? ` (${idea.partnerTeamName})` : ""}
         </div>
-        <div className={`text-xs font-medium tabular-nums ${deltaCls}`}>
-          PYV {deltaLabel}
+        <div className="flex items-center gap-2 shrink-0">
+          <MarketAlignmentTag alignment={idea.marketAlignment} />
+          <div className={`text-xs font-medium tabular-nums ${deltaCls}`}>
+            PYV {deltaLabel}
+          </div>
         </div>
       </div>
       <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center mb-2">
@@ -866,6 +916,41 @@ function TradeIdeaCard({
         Open in trade calc →
       </Link>
     </div>
+  );
+}
+
+// Compact tag showing whether FantasyCalc market view backs the trade.
+//   ok       → green "Market ✓"     — both signals agree, high confidence
+//   disagree → amber "Market disagrees" — PYV says fair, market says no;
+//              user should expect the counterparty to push back
+//   none     → zinc  "PYV-only"     — at least one player has no market
+//              data (typically rookies pre-FantasyCalc-coverage)
+function MarketAlignmentTag({
+  alignment,
+}: {
+  alignment: "ok" | "disagree" | "none";
+}) {
+  const cfg: Record<typeof alignment, { label: string; cls: string }> = {
+    ok: {
+      label: "Market ✓",
+      cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
+    },
+    disagree: {
+      label: "Market disagrees",
+      cls: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
+    },
+    none: {
+      label: "PYV-only",
+      cls: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+    },
+  };
+  const c = cfg[alignment];
+  return (
+    <span
+      className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap ${c.cls}`}
+    >
+      {c.label}
+    </span>
   );
 }
 
