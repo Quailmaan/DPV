@@ -85,7 +85,10 @@ export async function syncLeagueAction(
 
     revalidatePath("/league");
     revalidatePath(`/league/${result.leagueId}`);
-    redirect(`/league/${result.leagueId}`);
+    // ?pick=1 surfaces the team picker banner on first sync. The page
+    // also shows the picker whenever roster_id is null, so users who
+    // navigate away without picking can still complete it later.
+    redirect(`/league/${result.leagueId}?pick=1`);
   } catch (e) {
     if (
       e &&
@@ -125,6 +128,48 @@ export async function resyncLeagueAction(formData: FormData): Promise<void> {
   await syncSleeperLeague(leagueId);
   revalidatePath("/league");
   revalidatePath(`/league/${leagueId}`);
+}
+
+// Persist "which roster in this league is mine." Reading null on a
+// user_leagues row means the user hasn't picked yet — the league page
+// surfaces a dropdown banner, and the digest skips the league rather
+// than guess.
+//
+// Two-phase design (sync first, pick after) keeps the sync action fast
+// and stops us blocking the redirect on Sleeper roster shape parsing.
+// Users can also re-pick if they ever change Sleeper teams — same form,
+// same action.
+export async function setMyTeamAction(formData: FormData): Promise<void> {
+  const session = await requireSession("/login?next=/league");
+  const leagueId = String(formData.get("league_id") ?? "").trim();
+  const rosterIdRaw = String(formData.get("roster_id") ?? "").trim();
+  if (!leagueId || !rosterIdRaw) return;
+  const rosterId = Number.parseInt(rosterIdRaw, 10);
+  if (!Number.isFinite(rosterId)) return;
+
+  const sb = await createServerClient();
+
+  // Validate the roster exists in the league before saving — protects
+  // against a hand-crafted form post setting a bogus roster_id that
+  // would later cause the focused-team views to render empty.
+  const { data: roster } = await sb
+    .from("league_rosters")
+    .select("roster_id")
+    .eq("league_id", leagueId)
+    .eq("roster_id", rosterId)
+    .maybeSingle();
+  if (!roster) return;
+
+  // RLS limits the update to the user's own row.
+  await sb
+    .from("user_leagues")
+    .update({ roster_id: rosterId })
+    .eq("user_id", session.userId)
+    .eq("league_id", leagueId);
+
+  revalidatePath("/league");
+  revalidatePath(`/league/${leagueId}`);
+  redirect(`/league/${leagueId}`);
 }
 
 export async function removeLeagueAction(formData: FormData): Promise<void> {

@@ -24,10 +24,12 @@ import {
   type TradeFinderPlayer,
   type TradePosition,
 } from "@/lib/league/tradeFinder";
+import MyTeamPicker from "./MyTeamPicker";
 
 type SearchParams = Promise<{
   team?: string;
   pos?: string;
+  pick?: string;
 }>;
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE"] as const;
@@ -41,23 +43,37 @@ export default async function LeagueDetailPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const teamFilter = sp.team ?? "";
+  const explicitTeamFilter = sp.team ?? "";
+  const showPickBanner = sp.pick === "1";
   const posFilter = (sp.pos ?? "ALL").toUpperCase();
 
   const session = await getCurrentSession();
   if (!session) redirect(`/login?next=/league/${id}`);
 
   const sb = await createServerClient();
-  // Auth-gate: confirm the user actually subscribed to this league. RLS
+  // Auth-gate + read the user's persisted roster_id for this league. RLS
   // on user_leagues prevents leakage, so a missing row means "not yours."
   // Admin users can view any league for support / debugging.
+  let persistedRosterId: number | null = null;
   if (!session.isAdmin) {
     const { data: subscription } = await sb
       .from("user_leagues")
-      .select("league_id")
+      .select("league_id, roster_id")
       .eq("league_id", id)
       .maybeSingle();
     if (!subscription) redirect("/league");
+    persistedRosterId =
+      (subscription.roster_id as number | null | undefined) ?? null;
+  } else {
+    // Admin viewing the league: still try to load their own row so if
+    // they happen to subscribe themselves, the focus default works.
+    const { data: subscription } = await sb
+      .from("user_leagues")
+      .select("roster_id")
+      .eq("league_id", id)
+      .maybeSingle();
+    persistedRosterId =
+      (subscription?.roster_id as number | null | undefined) ?? null;
   }
   const [leagueRes, rostersRes, picksRes, tierState] = await Promise.all([
     sb.from("leagues").select("*").eq("league_id", id).maybeSingle(),
@@ -277,6 +293,13 @@ export default async function LeagueDetailPage({
     .filter((s) => !allRosteredIds.has(s.player_id))
     .slice(0, 200) as unknown as Snap[];
 
+  // Resolve which team the page focuses on. Priority order:
+  //   1. ?team=<rosterId> in the URL (explicit override — admin/exploring)
+  //   2. user_leagues.roster_id (persisted "my team" pick)
+  //   3. nothing (renders the unfocused power-rankings view)
+  const teamFilter =
+    explicitTeamFilter ||
+    (persistedRosterId !== null ? String(persistedRosterId) : "");
   const focusedTeam = teamFilter
     ? summaries.find(
         (s) => s.rosterId.toString() === teamFilter || s.ownerName === teamFilter,
@@ -418,29 +441,30 @@ export default async function LeagueDetailPage({
             </span>
           </div>
         </div>
-        <form action={`/league/${id}`} className="flex gap-2 items-center">
-          <label className="text-xs text-zinc-500">My Team</label>
-          <select
-            name="team"
-            defaultValue={teamFilter}
-            className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm"
-          >
-            <option value="">— select —</option>
-            {summaries.map((s) => (
-              <option key={s.rosterId} value={s.rosterId}>
-                {s.ownerName}
-                {s.teamName ? ` (${s.teamName})` : ""}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="px-3 py-1.5 rounded-md bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 text-sm"
-          >
-            Focus
-          </button>
-        </form>
+        <MyTeamPicker
+          leagueId={id}
+          currentRosterId={persistedRosterId}
+          rosters={summaries.map((s) => ({
+            rosterId: s.rosterId,
+            ownerName: s.ownerName,
+            teamName: s.teamName,
+          }))}
+          banner={false}
+        />
       </div>
+
+      {(persistedRosterId === null || showPickBanner) && (
+        <MyTeamPicker
+          leagueId={id}
+          currentRosterId={persistedRosterId}
+          rosters={summaries.map((s) => ({
+            rosterId: s.rosterId,
+            ownerName: s.ownerName,
+            teamName: s.teamName,
+          }))}
+          banner
+        />
+      )}
 
       <h2 className="text-sm font-semibold mb-3">Power Rankings</h2>
       <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 mb-8">

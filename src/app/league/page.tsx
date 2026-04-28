@@ -25,7 +25,7 @@ export default async function LeaguesPage() {
   const { data: rows } = await sb
     .from("user_leagues")
     .select(
-      "league_id, added_at, leagues:league_id (name, season, total_rosters, scoring_format, synced_at)",
+      "league_id, added_at, roster_id, leagues:league_id (name, season, total_rosters, scoring_format, synced_at)",
     )
     .order("added_at", { ascending: false });
 
@@ -47,6 +47,7 @@ export default async function LeaguesPage() {
     return {
       league_id: r.league_id,
       added_at: r.added_at,
+      roster_id: (r.roster_id as number | null | undefined) ?? null,
       name: league?.name ?? "(unknown)",
       season: league?.season ?? null,
       total_rosters: league?.total_rosters ?? null,
@@ -149,6 +150,14 @@ export default async function LeaguesPage() {
                     >
                       {l.name}
                     </Link>
+                    {l.roster_id === null && (
+                      <Link
+                        href={`/league/${l.league_id}?pick=1`}
+                        className="ml-2 text-[11px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+                      >
+                        Pick team
+                      </Link>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-zinc-500">{l.season}</td>
                   <td className="px-4 py-2 text-zinc-500">

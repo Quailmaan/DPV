@@ -69,10 +69,23 @@ create table if not exists public.user_leagues (
   league_id text not null references public.leagues(league_id) on delete cascade,
   added_at timestamptz not null default now(),
   is_default boolean not null default false,
+  -- Which Sleeper roster in this league belongs to the user. Nullable
+  -- because we don't ask at sync time — the user picks from a dropdown
+  -- after syncing (and existing rows from before this column was added
+  -- start out null until they pick). Features that need to know "your
+  -- team" (digest, default focus on /league/[id]) treat null as "not
+  -- picked yet" and surface a prompt rather than guessing.
+  roster_id integer,
   primary key (user_id, league_id)
 );
 
 create index if not exists idx_user_leagues_user on public.user_leagues(user_id);
+
+-- Add roster_id to existing user_leagues installations. Idempotent —
+-- the IF NOT EXISTS makes it safe to re-run on databases that already
+-- got the column from the create-table above.
+alter table public.user_leagues
+  add column if not exists roster_id integer;
 
 -- Subscription state per user. One row per user, written by the Stripe
 -- webhook on checkout completion / subscription updates. The presence of

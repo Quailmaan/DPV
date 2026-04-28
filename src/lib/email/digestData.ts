@@ -7,13 +7,13 @@
 // roster + trade ideas → report card). The math is shared via the pure
 // helpers; only the *loading* lives here.
 //
-// "Which roster is mine?" There's no persistent user→roster mapping in
-// the schema today (the league page lets the user pick from a dropdown
-// each visit). For the digest we identify the user's roster by matching
-// their Pylon `username` to a roster's `owner_display_name`
-// case-insensitively. If no match is found we skip the league — better
-// to send a digest that's *missing* a league than one with the wrong
-// team's analysis.
+// "Which roster is mine?" Read from `user_leagues.roster_id` — the user
+// picks their team via the MyTeamPicker on /league/[id] and that pick
+// persists. If the field is null (legacy rows pre-migration, or the user
+// just hasn't picked yet) we fall back to a case-insensitive match of
+// their Pylon `username` against `owner_display_name`. Still no match?
+// Skip the league — better to ship a digest missing a league than one
+// pinned to the wrong team.
 //
 // All Supabase calls use the admin client (bypasses RLS). The cron
 // route is server-only and never exposes this data to a browser.
@@ -85,10 +85,13 @@ export async function loadDigestLeagues(
 }> {
   const { data: subs } = await sb
     .from("user_leagues")
-    .select("league_id")
+    .select("league_id, roster_id")
     .eq("user_id", args.userId);
-  const leagueIds = (subs ?? []).map((r) => r.league_id as string);
-  if (leagueIds.length === 0) {
+  const subsRows = (subs ?? []) as Array<{
+    league_id: string;
+    roster_id: number | null;
+  }>;
+  if (subsRows.length === 0) {
     return { leagues: [], skippedLeagues: [] };
   }
 
@@ -99,13 +102,18 @@ export async function loadDigestLeagues(
     reason: string;
   }[] = [];
 
-  for (const leagueId of leagueIds) {
-    const block = await loadOneLeague(sb, leagueId, args.username);
+  for (const sub of subsRows) {
+    const block = await loadOneLeague(
+      sb,
+      sub.league_id,
+      args.username,
+      sub.roster_id,
+    );
     if (block.kind === "ok") {
       out.push(block.league);
     } else {
       skipped.push({
-        leagueId,
+        leagueId: sub.league_id,
         leagueName: block.leagueName,
         reason: block.reason,
       });
@@ -122,6 +130,7 @@ async function loadOneLeague(
   sb: SupabaseClient,
   leagueId: string,
   username: string,
+  pickedRosterId: number | null,
 ): Promise<OneLeagueResult> {
   const [leagueRes, rostersRes, picksRes] = await Promise.all([
     sb.from("leagues").select("*").eq("league_id", leagueId).maybeSingle(),
@@ -157,19 +166,27 @@ async function loadOneLeague(
     ownerRosterId: p.owner_roster_id,
   }));
 
-  // Match the user's Pylon username to a roster's owner_display_name
-  // case-insensitively. Sleeper usernames are case-insensitive; the
-  // display_name field preserves their chosen casing but matching can't.
-  const focusedRoster = rosters.find(
-    (r) =>
-      r.owner_display_name &&
-      r.owner_display_name.toLowerCase() === username.toLowerCase(),
-  );
+  // Resolve the focused roster. Prefer the persisted pick from
+  // user_leagues; only fall back to username matching for legacy rows
+  // (pre-picker users haven't opened /league/[id] since the column
+  // shipped). When neither resolves, skip the league.
+  let focusedRoster: RosterRow | undefined;
+  if (pickedRosterId !== null) {
+    focusedRoster = rosters.find((r) => r.roster_id === pickedRosterId);
+  }
+  if (!focusedRoster) {
+    focusedRoster = rosters.find(
+      (r) =>
+        r.owner_display_name &&
+        r.owner_display_name.toLowerCase() === username.toLowerCase(),
+    );
+  }
   if (!focusedRoster) {
     return {
       kind: "skip",
       leagueName: league.name,
-      reason: "Could not match Pylon username to a Sleeper team owner",
+      reason:
+        "No team picked for this league. Visit /league/{id} and use the team picker.",
     };
   }
 
