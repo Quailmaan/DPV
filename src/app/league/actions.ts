@@ -139,13 +139,29 @@ export async function resyncLeagueAction(formData: FormData): Promise<void> {
 // and stops us blocking the redirect on Sleeper roster shape parsing.
 // Users can also re-pick if they ever change Sleeper teams — same form,
 // same action.
-export async function setMyTeamAction(formData: FormData): Promise<void> {
+//
+// State-returning so the picker can render a clean error if the
+// migration hasn't been run (column missing) or if RLS rejects the
+// update — silently swallowing those was making "I picked but it
+// didn't save" mysterious to debug.
+export type SetMyTeamFormState = {
+  error?: string;
+};
+
+export async function setMyTeamAction(
+  _prev: SetMyTeamFormState,
+  formData: FormData,
+): Promise<SetMyTeamFormState> {
   const session = await requireSession("/login?next=/league");
   const leagueId = String(formData.get("league_id") ?? "").trim();
   const rosterIdRaw = String(formData.get("roster_id") ?? "").trim();
-  if (!leagueId || !rosterIdRaw) return;
+  if (!leagueId || !rosterIdRaw) {
+    return { error: "Pick a team first." };
+  }
   const rosterId = Number.parseInt(rosterIdRaw, 10);
-  if (!Number.isFinite(rosterId)) return;
+  if (!Number.isFinite(rosterId)) {
+    return { error: "Invalid team selection." };
+  }
 
   const sb = await createServerClient();
 
@@ -158,14 +174,21 @@ export async function setMyTeamAction(formData: FormData): Promise<void> {
     .eq("league_id", leagueId)
     .eq("roster_id", rosterId)
     .maybeSingle();
-  if (!roster) return;
+  if (!roster) {
+    return { error: "That team isn't in this league." };
+  }
 
-  // RLS limits the update to the user's own row.
-  await sb
+  // RLS limits the update to the user's own row. Capture the error so
+  // schema mismatches (column missing) surface to the UI instead of
+  // failing silently.
+  const { error: updateError } = await sb
     .from("user_leagues")
     .update({ roster_id: rosterId })
     .eq("user_id", session.userId)
     .eq("league_id", leagueId);
+  if (updateError) {
+    return { error: `Saving team: ${updateError.message}` };
+  }
 
   revalidatePath("/league");
   revalidatePath(`/league/${leagueId}`);
