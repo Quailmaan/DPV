@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Image from "next/image";
 import Link from "next/link";
 import { PylonWordmark } from "@/components/PylonLogo";
 import "./globals.css";
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pylon — Dynasty Player Valuation",
+  title: "Pylon",
   description:
     "Data-driven dynasty fantasy football values with historical comps and market calibration.",
 };
@@ -35,12 +36,32 @@ export default function RootLayout({
           <div className="mx-auto max-w-6xl px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3 flex-wrap">
             <Link
               href="/"
-              className="flex items-baseline gap-2 whitespace-nowrap"
+              className="flex items-center gap-2 whitespace-nowrap"
             >
+              {/* P-mark glyph paired with the PYLON wordmark text. Two
+                  variants: -light has the white P outline recolored to
+                  zinc-900 (visible on light header), -clean is the
+                  original white P (visible on dark header). Both have
+                  the bake-in dark background stripped to alpha. The
+                  wordmark stays as text so it scales with surrounding
+                  typography. */}
+              <Image
+                src="/pylon-logo-light.png"
+                alt=""
+                width={314}
+                height={228}
+                priority
+                className="h-7 w-auto sm:h-8 dark:hidden"
+              />
+              <Image
+                src="/pylon-logo-clean.png"
+                alt=""
+                width={314}
+                height={228}
+                priority
+                className="hidden h-7 w-auto sm:h-8 dark:block"
+              />
               <PylonWordmark size="md" />
-              <span className="text-zinc-400 text-sm hidden sm:inline">
-                / Dynasty Values
-              </span>
             </Link>
             {/* Nav scrolls horizontally if it overflows on narrow phones rather
                 than wrapping below the brand. -mx keeps the scroll edge flush
