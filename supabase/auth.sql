@@ -269,3 +269,51 @@ create policy "users read own subscription" on public.subscriptions
 -- work for unauthenticated browsing of the public DPV pages. Per-user
 -- access is enforced by joining through user_leagues server-side, not by
 -- locking down the leagues table.
+
+-- ============================================================
+-- EMAIL PREFERENCES
+-- ============================================================
+-- Opt-in storage for transactional / digest email. One row per user
+-- once they've ever expressed a preference; absence of a row means
+-- "default off". Storing a per-user unsubscribe_token lets us include
+-- a one-click unsubscribe URL in every email without exposing the
+-- user_id (CAN-SPAM + GDPR baseline).
+--
+-- last_digest_sent_at lets the cron skip users who already received
+-- this week's digest, so a re-fired cron (manual retry, double-fire)
+-- doesn't double-send.
+
+create table if not exists public.email_preferences (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  weekly_digest_opted_in boolean not null default false,
+  unsubscribe_token uuid not null default gen_random_uuid() unique,
+  last_digest_sent_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_email_preferences_token
+  on public.email_preferences(unsubscribe_token);
+
+drop trigger if exists email_preferences_set_updated_at on public.email_preferences;
+create trigger email_preferences_set_updated_at
+  before update on public.email_preferences
+  for each row execute function public.set_updated_at();
+
+alter table public.email_preferences enable row level security;
+
+drop policy if exists "users read own email prefs" on public.email_preferences;
+create policy "users read own email prefs" on public.email_preferences
+  for select to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "users insert own email prefs" on public.email_preferences;
+create policy "users insert own email prefs" on public.email_preferences
+  for insert to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "users update own email prefs" on public.email_preferences;
+create policy "users update own email prefs" on public.email_preferences
+  for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);

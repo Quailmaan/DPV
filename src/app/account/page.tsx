@@ -4,6 +4,8 @@ import { createServerClient } from "@/lib/supabase/server";
 import { SUPPORT_EMAIL, mailtoHref } from "@/lib/site/contact";
 import ChangePasswordForm from "./ChangePasswordForm";
 import ChangeUsernameForm from "./ChangeUsernameForm";
+import EmailPrefsForm from "./EmailPrefsForm";
+import { loadEmailPrefs } from "./emailPrefsActions";
 import SubscriptionSection from "./SubscriptionSection";
 
 type SearchParams = Promise<{ checkout?: string }>;
@@ -13,10 +15,11 @@ export default async function AccountPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const [session, tierState, sp] = await Promise.all([
+  const [session, tierState, sp, emailPrefs] = await Promise.all([
     requireSession(),
     getCurrentTier(),
     searchParams,
+    loadEmailPrefs(),
   ]);
 
   // Pull the price_id alongside so the section can label "Pro Monthly"
@@ -53,6 +56,14 @@ export default async function AccountPage({
       <section className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 mb-6">
         <h2 className="text-sm font-semibold mb-3">Password</h2>
         <ChangePasswordForm />
+      </section>
+
+      <section className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 mb-6">
+        <h2 className="text-sm font-semibold mb-3">Email preferences</h2>
+        <EmailPrefsForm
+          weeklyDigestOptedIn={emailPrefs.weeklyDigestOptedIn}
+          lastDigestSentAt={emailPrefs.lastDigestSentAt}
+        />
       </section>
 
       <div className="text-xs text-zinc-500">

@@ -47,6 +47,7 @@ export default async function PricingPage() {
             <Bullet>Universal trade calculator</Bullet>
             <Bullet>League power rankings &amp; team pages</Bullet>
             <Bullet>Player pages with HSM comps</Bullet>
+            <Bullet>Weekly email digest (opt-in)</Bullet>
           </ul>
           <div className="text-xs text-zinc-500">
             {session ? (
@@ -94,8 +95,8 @@ export default async function PricingPage() {
               Coming soon — included in Pro
             </div>
             <ul className="text-xs space-y-1 text-zinc-700 dark:text-zinc-300">
-              <ComingSoon>Weekly email digest</ComingSoon>
               <ComingSoon>CSV export</ComingSoon>
+              <ComingSoon>Mobile push notifications</ComingSoon>
             </ul>
           </div>
 
