@@ -348,6 +348,13 @@ export default async function LeagueDetailPage({
     const baseAge = position === "QB" ? 23 : 22;
     return Math.max(0, Math.floor(age - baseAge));
   }
+  function ageInYears(birthdate: string | null): number | null {
+    if (!birthdate) return null;
+    return (
+      (Date.now() - new Date(birthdate).getTime()) /
+      (365.25 * 24 * 3600 * 1000)
+    );
+  }
 
   // Trade finder — build TradeFinderTeam shape per roster from data
   // we already have, then ask the pure helper for top ideas. Computed
@@ -373,6 +380,7 @@ export default async function LeagueDetailPage({
         dpv: Number(s.dpv),
         marketValue: scaledMarketByPid.get(pid) ?? null,
         yearsPro: approxYearsPro(s.players.birthdate, tp),
+        age: ageInYears(s.players.birthdate),
         sellWindow: sellWindowByPlayer.get(pid) ?? null,
       });
     }
@@ -827,12 +835,13 @@ export default async function LeagueDetailPage({
   );
 }
 
-// One trade idea — `give → receive` with rationale and a quick link to
-// the trade calculator pre-loaded with both sides. Score and DPV delta
-// are surfaced so the user can size the deal at a glance. The market
-// alignment tag tells the user whether FantasyCalc backs or rejects
-// the PYV-suggested trade — both view types are useful (PYV catches
-// trades market hasn't priced in yet; market reality-checks PYV).
+// One trade idea — `give → receive (+ extras)` with rationale and a
+// quick link to the trade calculator pre-loaded with both sides. The
+// market alignment tag tells the user whether FantasyCalc backs the
+// PYV-suggested trade. When market initially disagreed, the trade
+// finder either added a sweetener (rendered as "+ Player" beneath
+// the receive anchor) or dropped the trade — disagree-without-fix
+// shouldn't surface at all.
 function TradeIdeaCard({
   leagueId,
   fromRosterId,
@@ -848,6 +857,12 @@ function TradeIdeaCard({
       position: string;
       dpv: number;
     };
+    receiveExtras: Array<{
+      playerId: string;
+      name: string;
+      position: string;
+      dpv: number;
+    }>;
     partnerRosterId: number;
     partnerName: string;
     partnerTeamName: string | null;
@@ -866,15 +881,19 @@ function TradeIdeaCard({
       : idea.myDpvDelta < 0
       ? "text-amber-700 dark:text-amber-400"
       : "text-zinc-500";
-  // Deep-link the trade calc with the entire trade pre-staged. The
-  // calc honors `from` / `to` / `give` / `receive` so the user lands on
-  // a fully-loaded trade — they just need to verify or hit send.
+  // Deep-link the trade calc with every asset pre-staged. The calc
+  // honors `from` / `to` / `give` / `receive` and accepts a
+  // comma-separated `receive` list, so 1-for-2s land fully loaded.
+  const receiveIds = [
+    idea.receive.playerId,
+    ...idea.receiveExtras.map((p) => p.playerId),
+  ].join(",");
   const tradeHref =
     `/trade?league=${leagueId}` +
     `&from=${fromRosterId}` +
     `&to=${idea.partnerRosterId}` +
     `&give=${encodeURIComponent(idea.give.playerId)}` +
-    `&receive=${encodeURIComponent(idea.receive.playerId)}`;
+    `&receive=${encodeURIComponent(receiveIds)}`;
   return (
     <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
       <div className="flex items-baseline justify-between mb-1 gap-2">
@@ -889,7 +908,7 @@ function TradeIdeaCard({
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center mb-2">
+      <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-start mb-2">
         <div>
           <div className="text-[11px] uppercase text-zinc-500">Give</div>
           <div className="font-medium leading-tight">{idea.give.name}</div>
@@ -897,13 +916,22 @@ function TradeIdeaCard({
             {idea.give.position} · {idea.give.dpv}
           </div>
         </div>
-        <div className="text-zinc-400">→</div>
+        <div className="text-zinc-400 mt-3">→</div>
         <div>
           <div className="text-[11px] uppercase text-zinc-500">Receive</div>
           <div className="font-medium leading-tight">{idea.receive.name}</div>
           <div className="text-xs text-zinc-500 tabular-nums">
             {idea.receive.position} · {idea.receive.dpv}
           </div>
+          {idea.receiveExtras.map((p) => (
+            <div key={p.playerId} className="mt-1 pt-1 border-t border-zinc-100 dark:border-zinc-800">
+              <div className="text-[11px] uppercase text-zinc-500">+ Sweetener</div>
+              <div className="font-medium leading-tight text-sm">{p.name}</div>
+              <div className="text-xs text-zinc-500 tabular-nums">
+                {p.position} · {p.dpv}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
       <div className="text-xs text-zinc-600 dark:text-zinc-400 mb-3">

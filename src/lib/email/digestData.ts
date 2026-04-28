@@ -342,6 +342,13 @@ async function loadOneLeague(
     const baseAge = position === "QB" ? 23 : 22;
     return Math.max(0, Math.floor(age - baseAge));
   }
+  function ageInYears(birthdate: string | null): number | null {
+    if (!birthdate) return null;
+    return (
+      (Date.now() - new Date(birthdate).getTime()) /
+      (365.25 * 24 * 3600 * 1000)
+    );
+  }
 
   // Build TradeFinderTeam shape per roster.
   function buildTradeFinderTeam(roster: RosterRow): TradeFinderTeam {
@@ -362,6 +369,7 @@ async function loadOneLeague(
         dpv: Number(s.dpv),
         marketValue: scaledMarketByPid.get(pid) ?? null,
         yearsPro: approxYearsPro(s.players.birthdate, tp),
+        age: ageInYears(s.players.birthdate),
         sellWindow: sellWindowByPlayer.get(pid) ?? null,
       });
     }
