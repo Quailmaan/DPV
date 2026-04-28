@@ -247,12 +247,62 @@ export const SCORING_FORMAT_WEIGHTS: Record<
   TE: { STANDARD: 0.9, HALF_PPR: 0.95, FULL_PPR: 1.05 },
 };
 
-export function scarcityMultiplier(positionRank: number): number {
-  if (positionRank <= 3) return 1.18;
-  if (positionRank <= 6) return 1.1;
-  if (positionRank <= 12) return 1.0;
-  if (positionRank <= 24) return 0.92;
-  return 0.8;
+// Position-aware scarcity. Calibrated for the platform default —
+// 12-team 1QB / 2RB / 2WR / 1TE / 2 FLEX. The starter pool size
+// determines where the cliff sits:
+//
+//   QB ≈ 12 starters       → sharp cliff at rank 12, hard floor below
+//   TE ≈ 13 starters       → similar shape, slight elite-tier premium
+//   RB ≈ 35 starters       → broad starter pool through rank 36
+//   WR ≈ 35 starters       → similar to RB, slightly deeper PPR tail
+//
+// In 1QB the value of any QB past rank 12 collapses fast — QB13 is a
+// streamer, QB25 is roster filler. Meanwhile the 24th RB is still a
+// flex-eligible starter every week. The old single-curve formula (rank
+// 6 = 1.10, rank 12 = 1.00, rank 25 = 0.80) over-rewarded mid-pack QBs
+// vs. mid-pack RBs/WRs and produced the canonical "Mac Jones > Quinshon
+// Judkins" wrongness. Top-tier QBs are still valuable but capped at
+// 0.95 — they don't outweigh a top-tier RB the way the previous curve
+// allowed.
+//
+// Superflex / 2QB leagues need a different QB curve. Today the rankings
+// table is calibrated as 1QB across the board; the SF adjustment is a
+// runtime multiplier on the league page (TODO — uses
+// isSuperflexConstruction from scarcity.ts).
+export function scarcityMultiplier(
+  position: Position,
+  positionRank: number,
+): number {
+  switch (position) {
+    case "QB":
+      if (positionRank <= 3) return 0.95;
+      if (positionRank <= 6) return 0.78;
+      if (positionRank <= 12) return 0.62;
+      if (positionRank <= 18) return 0.4;
+      if (positionRank <= 24) return 0.22;
+      return 0.12;
+    case "TE":
+      if (positionRank <= 3) return 1.22;
+      if (positionRank <= 6) return 1.1;
+      if (positionRank <= 12) return 1.0;
+      if (positionRank <= 20) return 0.78;
+      if (positionRank <= 30) return 0.55;
+      return 0.4;
+    case "RB":
+      if (positionRank <= 6) return 1.18;
+      if (positionRank <= 12) return 1.1;
+      if (positionRank <= 24) return 1.02;
+      if (positionRank <= 36) return 0.92;
+      if (positionRank <= 48) return 0.78;
+      return 0.62;
+    case "WR":
+      if (positionRank <= 6) return 1.18;
+      if (positionRank <= 12) return 1.1;
+      if (positionRank <= 24) return 1.02;
+      if (positionRank <= 36) return 0.92;
+      if (positionRank <= 50) return 0.78;
+      return 0.65;
+  }
 }
 
 export function marketBlendWeights(

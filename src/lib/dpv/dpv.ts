@@ -85,7 +85,7 @@ export function calculateDPV(input: DPVInput): DPVResult {
       : dpvProjected;
 
   const scarcity = input.positionRank
-    ? scarcityMultiplier(input.positionRank)
+    ? scarcityMultiplier(position, input.positionRank)
     : 1.0;
   const rookieDisplacement = input.rookieDisplacementMult ?? 1.0;
   const scaled = dpvFinal * scarcity * rookieDisplacement;

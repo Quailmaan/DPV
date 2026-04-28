@@ -25,13 +25,24 @@ import type { Position, QBTier, ScoringFormat } from "./types";
 // when the caller is pricing for a SF/2-QB league.
 const BASE_BY_POSITION_ROUND: Record<Position, Record<number, number>> = {
   QB: {
-    1: 3600, // franchise QB investment, but in 1-QB he's behind 11 vet QB1s
-    2: 1500, // developmental, bridge potential
-    3: 850,
-    4: 500,
-    5: 280,
-    6: 180,
-    7: 110,
+    // 1-QB calibration: only 12 starting QB slots league-wide, so even an
+    // R1 franchise pick is competing for the BOTTOM of the QB1 tier
+    // until he displaces a vet starter — usually a 1-2 year process. The
+    // values here mirror the new position-aware scarcity curve in
+    // constants.ts (top-3 QB ×0.95, mid-pack ×0.62) so a hypothetical
+    // rookie who turned out to be QB12 maps to ≈2400 × dev modifiers,
+    // which lines up with the post-scarcity DPV the BPS pipeline would
+    // produce for that same player as a vet. Old values (3600 R1 etc.)
+    // were calibrated against the old single-curve scarcity formula and
+    // ranked rookie QBs above starting RBs, which 1QB economics doesn't
+    // support. SF leagues recover the higher values via SF_QB_MULT below.
+    1: 2400, // franchise QB investment, but 11 vet QB1s ahead
+    2: 1000, // developmental / bridge
+    3: 575,
+    4: 340,
+    5: 190,
+    6: 120,
+    7: 75,
   },
   RB: {
     1: 5200, // bellcow investment — 3-year window
@@ -65,26 +76,27 @@ const BASE_BY_POSITION_ROUND: Record<Position, Record<number, number>> = {
 // UDFA / undrafted (no round recorded) gets a token value — plausible depth
 // flier, nothing more.
 const UDFA_BY_POSITION: Record<Position, number> = {
-  QB: 60,
+  QB: 40,
   RB: 200,
   WR: 250,
   TE: 120,
 };
 
-// Superflex / 2-QB multiplier on QB DPV. Roughly recovers the historic Superflex-
-// calibrated values (R1 ≈ 6500, R2 ≈ 3500) from the 1-QB-default base above.
-// Only meaningful for QBs — RB/WR/TE values don't shift with SF since their
+// Superflex / 2-QB multiplier on QB DPV. Bumped 1.5× from the old values
+// because the 1-QB BASE values dropped 33% — net effect on SF DPV is the
+// same (R1 ≈ 6700, R2 ≈ 2480), so SF rankings shouldn't shift. Only
+// meaningful for QBs — RB/WR/TE values don't move with SF since their
 // scarcity is unchanged (FLEX still pulls from the same skill pool).
 const SF_QB_MULT_BY_ROUND: Record<number, number> = {
-  1: 1.85,
-  2: 1.65,
-  3: 1.55,
-  4: 1.45,
-  5: 1.4,
-  6: 1.4,
-  7: 1.4,
+  1: 2.78,
+  2: 2.48,
+  3: 2.33,
+  4: 2.18,
+  5: 2.1,
+  6: 2.1,
+  7: 2.1,
 };
-const SF_QB_MULT_UDFA = 1.4;
+const SF_QB_MULT_UDFA = 2.1;
 
 /**
  * Superflex/2-QB multiplier for a QB rookie's DPV. Use this when you have

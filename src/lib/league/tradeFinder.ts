@@ -59,10 +59,19 @@ export type TradeIdea = {
 const POSITIONS: TradePosition[] = ["QB", "RB", "WR", "TE"];
 
 // Ignore trades where DPV gap exceeds this fraction of the larger
-// player. 0.30 is generous — fantasy traders pay the "win-now premium"
-// for an established vet over a younger asset, so we don't want to
-// drop those.
-const MAX_DPV_IMBALANCE = 0.3;
+// player. Tightened from 0.30 to 0.15 — the old gate let through trades
+// like "give Justin Jefferson, receive Daniel Jones" because the % gap
+// was technically under 30%. 15% keeps the win-now-premium use case
+// (vet for younger asset) without surfacing trades a manager would
+// laugh at.
+const MAX_DPV_IMBALANCE = 0.15;
+
+// Hard floor on what the focused team can give up net. Even if a trade
+// passes the % gate, suggesting "give up 749 PYV more than you get
+// back" is bad UX — the percentage gate alone is too permissive when
+// both players are 4000+ PYV. 250 PYV is roughly "one tier" of value,
+// which is the most we'll let a sell-window trade swing.
+const MAX_ABS_DPV_GIVEUP = 250;
 
 // Position need threshold below which we don't count a position as a
 // "real" need. Stops a roster that's 1% below average from being
@@ -111,8 +120,15 @@ export function findTrades(
         // "trade A for B" where A and B are both my weak spots.
         if (give.position === receive.position) continue;
 
-        // DPV proximity. Reject lopsided values.
-        const dpvSpread = Math.abs(receive.dpv - give.dpv);
+        // DPV proximity. Reject lopsided values on two axes:
+        //   1. % imbalance — cheap-vs-cheap fairness (tight 15% gate).
+        //   2. Absolute give-up — caps how much PYV the focused team
+        //      can lose net even on big trades that pass the % gate.
+        // Receive-more is fine (positive myDpvDelta is always allowed);
+        // we only floor the give-up direction.
+        const myDpvDelta = receive.dpv - give.dpv;
+        if (myDpvDelta < -MAX_ABS_DPV_GIVEUP) continue;
+        const dpvSpread = Math.abs(myDpvDelta);
         const dpvMax = Math.max(receive.dpv, give.dpv);
         if (dpvMax === 0) continue;
         const dpvImbalance = dpvSpread / dpvMax;
@@ -132,7 +148,7 @@ export function findTrades(
           partnerRosterId: partner.rosterId,
           partnerName: partner.ownerName,
           partnerTeamName: partner.teamName,
-          myDpvDelta: receive.dpv - give.dpv,
+          myDpvDelta,
           rationale: buildRationale({
             give,
             receive,
