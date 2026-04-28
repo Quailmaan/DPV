@@ -72,6 +72,15 @@ const MARKET_SELL_GAP = -5;
 // on the trade market.
 const DEEP_BENCH_DPV = 200;
 
+// Approximate NFL years played from age + position. QBs typically
+// enter at 23, skill players at 22 — that offset is the only
+// positional split. Used to gate the "fade the market" sell-fallback
+// on players with too little NFL evidence for the model to be right.
+function approxYearsPro(position: Position, age: number): number {
+  const baseAge = position === "QB" ? 23 : 22;
+  return Math.max(0, Math.floor(age - baseAge));
+}
+
 export function computeSellWindow(input: SellWindowInput): SellWindow {
   const { position, age, dpv, marketDelta } = input;
 
@@ -93,6 +102,7 @@ export function computeSellWindow(input: SellWindowInput): SellWindow {
 
   const cliff = AGE_CLIFFS[position];
   const yearsToCliff = cliff.full - age; // negative = already past peak
+  const yearsPro = approxYearsPro(position, age);
 
   // ---- SELL NOW --------------------------------------------------------
   // Past the position's full-value zone AND market hasn't fully discounted.
@@ -150,6 +160,35 @@ export function computeSellWindow(input: SellWindowInput): SellWindow {
     return verdict(
       "PEAK_HOLD",
       `Peak window — value matches production. Hold for points.`,
+      "open",
+    );
+  }
+
+  // ---- YOUNG-PLAYER GUARD ----------------------------------------------
+  // Rookies and second-year players have very thin NFL evidence. Our
+  // PYV stays conservative on them while FantasyCalc loves the rookie
+  // hype, so marketDelta is naturally very negative. Don't tag them
+  // SELL_SOON for that — let the evidence accumulate.
+  if (yearsPro <= 2) {
+    if (marketDelta !== null && marketDelta >= MARKET_BUY_GAP) {
+      // Rare, but if our model already loves them more than the market,
+      // the BUY signal is honest.
+      return verdict(
+        "BUY",
+        `Young (${age.toFixed(0)}) — model rates them ahead of market.`,
+        "open",
+      );
+    }
+    if (marketDelta !== null && marketDelta <= MARKET_SELL_GAP) {
+      return verdict(
+        "HOLD",
+        `Young (${age.toFixed(0)}) — market sees more than our model yet; let evidence accumulate before selling.`,
+        "open",
+      );
+    }
+    return verdict(
+      "HOLD",
+      `Young (${age.toFixed(0)}) — model still calibrating, default hold.`,
       "open",
     );
   }
