@@ -1,0 +1,204 @@
+-- Pylon — auth schema
+--
+-- Run this in the Supabase SQL Editor AFTER schema.sql. It is idempotent —
+-- safe to re-run. It introduces:
+--
+--   profiles      — one row per auth.users user, holds the public-facing
+--                   username and display_name. The username is the login
+--                   handle (resolved to email server-side at sign-in).
+--   user_leagues  — many-to-many between users and leagues, capped at 3
+--                   per user via trigger. The leagues table itself stays
+--                   shared so we don't re-sync the same Sleeper league
+--                   for every user.
+--
+-- Auth tokens / hashes / sensitive identity data live ONLY in Supabase's
+-- auth.users table, which is NOT readable by the app. The app reads
+-- profiles via RLS-scoped queries. RLS on user_leagues makes a user's
+-- league subscriptions invisible to other users.
+--
+-- ============================================================
+-- Provider setup (do these in the Supabase dashboard, not in SQL)
+-- ============================================================
+--
+-- Email / password (Phase 1):
+--   Authentication → Providers → Email — enabled by default.
+--   Authentication → URL Configuration:
+--     Site URL: https://yourdomain.com   (or http://localhost:3000 for dev)
+--     Additional Redirect URLs:
+--       http://localhost:3000/auth/callback
+--       https://yourdomain.com/auth/callback
+--
+-- Google OAuth (Phase 2):
+--   1. Google Cloud Console → APIs & Services → Credentials
+--      → Create OAuth 2.0 Client ID (Web application).
+--      Authorized redirect URI:
+--        https://<project-ref>.supabase.co/auth/v1/callback
+--      Note the client ID + secret.
+--   2. Supabase dashboard → Authentication → Providers → Google
+--      → toggle on, paste the client ID and secret, save.
+--   3. Make sure /auth/callback (your app's callback) is in the
+--      "Additional Redirect URLs" list above. Supabase relays from its
+--      own /auth/v1/callback to whatever `redirectTo` we pass, and
+--      that URL has to be on the allow-list.
+
+-- ============================================================
+-- TABLES
+-- ============================================================
+
+create table if not exists public.profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  -- Username is the login handle. Stored case-preserving for display, but
+  -- unique-indexed case-insensitive (citext would be cleaner, but a
+  -- functional unique index avoids the extension dependency). Validated
+  -- to 3-24 chars of [a-z0-9_].
+  username text unique not null,
+  display_name text,
+  is_admin boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint profiles_username_format
+    check (username ~ '^[a-zA-Z0-9_]{3,24}$')
+);
+
+-- Case-insensitive uniqueness so "Billy" and "billy" can't both exist.
+create unique index if not exists idx_profiles_username_lower
+  on public.profiles (lower(username));
+
+create table if not exists public.user_leagues (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  league_id text not null references public.leagues(league_id) on delete cascade,
+  added_at timestamptz not null default now(),
+  is_default boolean not null default false,
+  primary key (user_id, league_id)
+);
+
+create index if not exists idx_user_leagues_user on public.user_leagues(user_id);
+
+-- ============================================================
+-- TRIGGERS
+-- ============================================================
+
+-- Auto-bump updated_at on profile changes.
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_set_updated_at on public.profiles;
+create trigger profiles_set_updated_at
+  before update on public.profiles
+  for each row execute function public.set_updated_at();
+
+-- Cap each user at 3 leagues. Enforced before insert so the API can rely
+-- on a clean error rather than racing.
+create or replace function public.enforce_user_league_cap()
+returns trigger
+language plpgsql
+as $$
+declare
+  current_count int;
+begin
+  select count(*) into current_count
+    from public.user_leagues
+    where user_id = new.user_id;
+  if current_count >= 3 then
+    raise exception 'user_leagues_cap_exceeded'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists user_leagues_cap on public.user_leagues;
+create trigger user_leagues_cap
+  before insert on public.user_leagues
+  for each row execute function public.enforce_user_league_cap();
+
+-- Auto-create a placeholder profile row whenever a new auth.users row is
+-- created. Username defaults to "user_<short-uuid>" — kept as a placeholder
+-- regardless of provider so the welcome flow always forces the user to
+-- pick a real handle (we don't want a Google display name as the login
+-- key). For OAuth signups, we DO seed display_name from the provider's
+-- metadata so the UI has something nicer to render until the user
+-- customizes it. Google sets `full_name` in raw_user_meta_data.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  fallback_username text;
+  meta_name text;
+begin
+  fallback_username := 'user_' || replace(substring(new.id::text from 1 for 8), '-', '');
+  meta_name := coalesce(
+    new.raw_user_meta_data->>'full_name',
+    new.raw_user_meta_data->>'name',
+    null
+  );
+  insert into public.profiles (user_id, username, display_name)
+  values (new.id, fallback_username, meta_name)
+  on conflict (user_id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- ============================================================
+-- RLS
+-- ============================================================
+
+alter table public.profiles enable row level security;
+alter table public.user_leagues enable row level security;
+
+-- Profiles: public read of (username, display_name) so other features can
+-- show "@username" without leaking PII (no email here). Update only by
+-- the owning user. No client-side insert (the trigger handles it).
+drop policy if exists "public read profiles" on public.profiles;
+create policy "public read profiles" on public.profiles
+  for select to anon, authenticated using (true);
+
+drop policy if exists "users update own profile" on public.profiles;
+create policy "users update own profile" on public.profiles
+  for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- user_leagues: each user sees only their own subscriptions, can add or
+-- remove rows for themselves, and cannot read others' rows.
+drop policy if exists "users read own user_leagues" on public.user_leagues;
+create policy "users read own user_leagues" on public.user_leagues
+  for select to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "users insert own user_leagues" on public.user_leagues;
+create policy "users insert own user_leagues" on public.user_leagues
+  for insert to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "users delete own user_leagues" on public.user_leagues;
+create policy "users delete own user_leagues" on public.user_leagues
+  for delete to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "users update own user_leagues" on public.user_leagues;
+create policy "users update own user_leagues" on public.user_leagues
+  for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- The leagues table itself stays publicly readable (already enabled in
+-- schema.sql) so the league dashboards and trade calculator continue to
+-- work for unauthenticated browsing of the public DPV pages. Per-user
+-- access is enforced by joining through user_leagues server-side, not by
+-- locking down the leagues table.

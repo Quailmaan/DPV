@@ -68,7 +68,7 @@ export default async function RookiesPage({
   // — so QBs leapfrog skill positions, as they should in SF/2-QB leagues.
   const superflex = sp.sf === "1";
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
   // Pull all the data we need in parallel:
   //   - Prospect consensus rankings (pre-draft).
   //   - Player records for the incoming class (post-draft sync-draft-capital).

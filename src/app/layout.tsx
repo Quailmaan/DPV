@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
+import HeaderAuth from "@/components/HeaderAuth";
 import { PylonWordmark } from "@/components/PylonLogo";
 import "./globals.css";
 
@@ -66,7 +67,7 @@ export default function RootLayout({
             {/* Nav scrolls horizontally if it overflows on narrow phones rather
                 than wrapping below the brand. -mx keeps the scroll edge flush
                 with the screen edge so swipe affordance is clearer. */}
-            <nav className="flex gap-4 sm:gap-5 text-sm text-zinc-600 dark:text-zinc-400 overflow-x-auto whitespace-nowrap -mx-3 px-3 sm:mx-0 sm:px-0">
+            <nav className="flex gap-4 sm:gap-5 text-sm text-zinc-600 dark:text-zinc-400 overflow-x-auto whitespace-nowrap -mx-3 px-3 sm:mx-0 sm:px-0 order-3 sm:order-2 basis-full sm:basis-auto">
               <Link
                 href="/"
                 className="hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -98,6 +99,9 @@ export default function RootLayout({
                 Methodology
               </Link>
             </nav>
+            <div className="order-2 sm:order-3 ml-auto">
+              <HeaderAuth />
+            </div>
           </div>
         </header>
         <main className="mx-auto max-w-6xl w-full px-3 sm:px-6 py-6 sm:py-8 flex-1">

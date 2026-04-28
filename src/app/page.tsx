@@ -30,7 +30,7 @@ export default async function RankingsPage({
   const pos = (sp.pos || "ALL").toUpperCase();
   const q = (sp.q ?? "").trim();
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
   const [snapshotsRes, marketRes] = await Promise.all([
     sb
       .from("dpv_snapshots")

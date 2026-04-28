@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { getCurrentSession } from "@/lib/auth/session";
 import { createServerClient } from "@/lib/supabase/server";
 import type { ScoringFormat } from "@/lib/dpv/types";
 
@@ -22,7 +23,21 @@ export default async function LeagueDetailPage({
   const teamFilter = sp.team ?? "";
   const posFilter = (sp.pos ?? "ALL").toUpperCase();
 
-  const sb = createServerClient();
+  const session = await getCurrentSession();
+  if (!session) redirect(`/login?next=/league/${id}`);
+
+  const sb = await createServerClient();
+  // Auth-gate: confirm the user actually subscribed to this league. RLS
+  // on user_leagues prevents leakage, so a missing row means "not yours."
+  // Admin users can view any league for support / debugging.
+  if (!session.isAdmin) {
+    const { data: subscription } = await sb
+      .from("user_leagues")
+      .select("league_id")
+      .eq("league_id", id)
+      .maybeSingle();
+    if (!subscription) redirect("/league");
+  }
   const [leagueRes, rostersRes] = await Promise.all([
     sb.from("leagues").select("*").eq("league_id", id).maybeSingle(),
     sb

@@ -10,6 +10,7 @@
     "refresh": "npx tsx scripts/refresh-all.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.104.0",
     "dotenv": "^17.4.2",
     "next": "16.2.4",

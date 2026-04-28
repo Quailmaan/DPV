@@ -48,7 +48,7 @@ export default async function TradePage({
   const requestedLeague = sp.league ?? null;
   const fromRosterId = sp.from ?? null;
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
 
   let fmt: ScoringFormat = isScoringFormat(sp.fmt) ? sp.fmt : "HALF_PPR";
   let leagueName: string | null = null;

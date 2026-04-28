@@ -144,7 +144,7 @@ export default async function PlayerPage({
   const sp = await searchParams;
   const fmt: ScoringFormat = isScoringFormat(sp.fmt) ? sp.fmt : "HALF_PPR";
 
-  const sb = createServerClient();
+  const sb = await createServerClient();
 
   const [playerRes, seasonsRes, snapshotRes, marketRes, hsmRes, combineRes] =
     await Promise.all([

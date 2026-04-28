@@ -178,7 +178,7 @@ export default async function ProspectPage({
   const { id } = await params;
   const sp = searchParams ? await searchParams : {};
   const superflex = sp.sf === "1";
-  const sb = createServerClient();
+  const sb = await createServerClient();
 
   const [consensusRes, sourcesRes] = await Promise.all([
     sb
