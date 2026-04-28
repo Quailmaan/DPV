@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { getCurrentTier } from "@/lib/billing/tier";
 import { createServerClient } from "@/lib/supabase/server";
 import { CURRENT_SEASON } from "@/lib/dpv/constants";
 import type { ScoringFormat } from "@/lib/dpv/types";
@@ -49,8 +51,15 @@ export default async function TradePage({
   searchParams: SearchParams;
 }) {
   const sp = await searchParams;
-  const requestedLeague = sp.league ?? null;
   const fromRosterId = sp.from ?? null;
+
+  // Pro gates: league-aware mode (per-team rosters, traded picks) and the
+  // Buy/Sell market-delta flags both require Pro. Free users get the same
+  // calculator without those Pro-only signals — they can still pick any
+  // player + raw DPV math.
+  const tierState = await getCurrentTier();
+  const isPro = tierState.tier === "pro";
+  const requestedLeague = isPro ? sp.league ?? null : null;
 
   const sb = await createServerClient();
 
@@ -225,7 +234,10 @@ export default async function TradePage({
       // contributes a real disagreement signal vs. a no-op fallback.
       market: p.market ?? p.dpv,
       hasMarket,
-      marketDelta: deltaById.get(p.id) ?? null,
+      // Buy/Sell flags are a Pro feature — strip the delta for free users
+      // so the calculator falls through the null-delta branch in
+      // buySellBadge() and renders no badge.
+      marketDelta: isPro ? deltaById.get(p.id) ?? null : null,
       tier: p.tier,
     };
   });
@@ -411,6 +423,21 @@ export default async function TradePage({
             </span>
           )}
         </p>
+        {!isPro && (
+          <div className="mt-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              Pro:
+            </span>{" "}
+            League-aware mode (per-team rosters + traded picks) and Buy/Sell
+            market signals.{" "}
+            <Link
+              href="/pricing"
+              className="font-medium text-emerald-700 dark:text-emerald-400 hover:underline"
+            >
+              Upgrade →
+            </Link>
+          </div>
+        )}
       </div>
       <TradeCalculator
         players={players}

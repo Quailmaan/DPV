@@ -74,6 +74,42 @@ create table if not exists public.user_leagues (
 
 create index if not exists idx_user_leagues_user on public.user_leagues(user_id);
 
+-- Subscription state per user. One row per user, written by the Stripe
+-- webhook on checkout completion / subscription updates. The presence of
+-- a row at status='active' or 'trialing' grants Pro tier; absent users
+-- and any other status are treated as free.
+--
+-- We store the Stripe customer ID once per user so subsequent checkouts
+-- (upgrade, change billing) reuse the same customer record. The
+-- subscription ID lets the customer portal know which sub to manage.
+create table if not exists public.subscriptions (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  stripe_customer_id text not null,
+  stripe_subscription_id text,
+  -- Mirrors Stripe's subscription.status verbatim so we can debug from
+  -- the DB without re-querying Stripe. Treated as Pro when in
+  -- ('active','trialing'); anything else is free.
+  status text not null default 'incomplete',
+  -- Which price the user picked — used by the account page to render
+  -- "$7/mo" vs "$59/yr" without another Stripe round-trip.
+  price_id text,
+  current_period_end timestamptz,
+  -- Set when the user clicks "cancel" in the portal. The sub stays
+  -- active until current_period_end, then Stripe sends a delete event
+  -- and we flip status to 'canceled'.
+  cancel_at_period_end boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_subscriptions_customer
+  on public.subscriptions(stripe_customer_id);
+
+drop trigger if exists subscriptions_set_updated_at on public.subscriptions;
+create trigger subscriptions_set_updated_at
+  before update on public.subscriptions
+  for each row execute function public.set_updated_at();
+
 -- ============================================================
 -- TRIGGERS
 -- ============================================================
@@ -94,19 +130,40 @@ create trigger profiles_set_updated_at
   before update on public.profiles
   for each row execute function public.set_updated_at();
 
--- Cap each user at 3 leagues. Enforced before insert so the API can rely
--- on a clean error rather than racing.
+-- Tier-aware league cap. Free users are capped at 1; Pro users
+-- (subscriptions.status in active/trialing) are uncapped. Enforced
+-- before insert so the API can rely on a clean error rather than racing.
+--
+-- The cap delta from "3 free" to "1 free / unlimited Pro" is the
+-- monetization gate: paying upgrades the cap, churning back to free
+-- doesn't auto-delete extras (they linger read-only) — the app surfaces
+-- a "you're over the free cap" warning until the user removes some.
 create or replace function public.enforce_user_league_cap()
 returns trigger
 language plpgsql
 as $$
 declare
   current_count int;
+  user_tier text;
 begin
+  -- Treat active/trialing as Pro. Anything else (including no row) is
+  -- free. Kept as a single SELECT so the trigger stays cheap.
+  select case
+    when status in ('active','trialing') then 'pro'
+    else 'free'
+  end into user_tier
+  from public.subscriptions
+  where user_id = new.user_id;
+  if user_tier is null then user_tier := 'free'; end if;
+
+  if user_tier = 'pro' then
+    return new; -- no cap
+  end if;
+
   select count(*) into current_count
     from public.user_leagues
     where user_id = new.user_id;
-  if current_count >= 3 then
+  if current_count >= 1 then
     raise exception 'user_leagues_cap_exceeded'
       using errcode = 'check_violation';
   end if;
@@ -160,6 +217,7 @@ create trigger on_auth_user_created
 
 alter table public.profiles enable row level security;
 alter table public.user_leagues enable row level security;
+alter table public.subscriptions enable row level security;
 
 -- Profiles: public read of (username, display_name) so other features can
 -- show "@username" without leaking PII (no email here). Update only by
@@ -196,6 +254,15 @@ create policy "users update own user_leagues" on public.user_leagues
   for update to authenticated
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- subscriptions: read-only by the owner. Writes happen exclusively from
+-- the Stripe webhook handler using the service-role key (which bypasses
+-- RLS), so there's no insert/update policy here — clients should never
+-- be able to forge their own subscription state.
+drop policy if exists "users read own subscription" on public.subscriptions;
+create policy "users read own subscription" on public.subscriptions
+  for select to authenticated
+  using (auth.uid() = user_id);
 
 -- The leagues table itself stays publicly readable (already enabled in
 -- schema.sql) so the league dashboards and trade calculator continue to

@@ -4,13 +4,17 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { createServerClient } from "@/lib/supabase/server";
+import { readSubscriptionState } from "@/lib/billing/tier";
 import { syncSleeperLeague } from "@/lib/sleeper/sync";
 
 export type SyncFormState = {
   error?: string;
 };
 
-const MAX_LEAGUES_PER_USER = 3;
+// Free tier ceiling. Pro is uncapped — the DB trigger
+// (enforce_user_league_cap) is the hard guarantee, this constant just
+// drives the friendlier client-side error path.
+const FREE_LEAGUE_CAP = 1;
 
 export async function syncLeagueAction(
   _prev: SyncFormState,
@@ -24,6 +28,12 @@ export async function syncLeagueAction(
   }
 
   const sb = await createServerClient();
+
+  // Resolve the user's tier so the cap math is correct. Pro is
+  // uncapped; free is FREE_LEAGUE_CAP. The DB trigger enforces the
+  // same rule — this is the friendly preflight path.
+  const tierState = await readSubscriptionState(sb, session.userId);
+  const isPro = tierState.tier === "pro";
 
   // Cap check before doing the sync work — bail out cleanly when at limit.
   // RLS scopes user_leagues to the current user, so this counts only
@@ -42,9 +52,9 @@ export async function syncLeagueAction(
     .select("league_id")
     .eq("league_id", leagueId)
     .maybeSingle();
-  if (!existing && (count ?? 0) >= MAX_LEAGUES_PER_USER) {
+  if (!existing && !isPro && (count ?? 0) >= FREE_LEAGUE_CAP) {
     return {
-      error: `You're at the ${MAX_LEAGUES_PER_USER}-league limit. Remove one first.`,
+      error: `Free accounts are limited to ${FREE_LEAGUE_CAP} league. Upgrade to Pro for unlimited leagues, or remove your existing league first.`,
     };
   }
 
@@ -63,9 +73,11 @@ export async function syncLeagueAction(
     if (linkError) {
       // The DB trigger raises this when the cap is hit. Surface a
       // friendly message instead of the raw Postgres exception text.
+      // The trigger reads tier from the subscriptions table, so this
+      // path only fires for free users at the FREE_LEAGUE_CAP limit.
       if (linkError.message.includes("user_leagues_cap_exceeded")) {
         return {
-          error: `You're at the ${MAX_LEAGUES_PER_USER}-league limit.`,
+          error: `Free accounts are limited to ${FREE_LEAGUE_CAP} league. Upgrade to Pro for unlimited leagues.`,
         };
       }
       return { error: linkError.message };

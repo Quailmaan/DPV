@@ -1,18 +1,24 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth/session";
+import { readSubscriptionState } from "@/lib/billing/tier";
 import { createServerClient } from "@/lib/supabase/server";
 import RemoveLeagueButton from "./RemoveLeagueButton";
 import ResyncLeagueButton from "./ResyncLeagueButton";
 import SyncLeagueForm from "./SyncLeagueForm";
 
-const MAX_LEAGUES_PER_USER = 3;
+// Free tier ceiling. Pro is uncapped — both this page and the
+// syncLeagueAction read the user's tier and gate accordingly. The DB
+// trigger (enforce_user_league_cap) is the hard guarantee.
+const FREE_LEAGUE_CAP = 1;
 
 export default async function LeaguesPage() {
   const session = await getCurrentSession();
   if (!session) redirect("/login?next=/league");
 
   const sb = await createServerClient();
+  const tierState = await readSubscriptionState(sb, session.userId);
+  const isPro = tierState.tier === "pro";
 
   // user_leagues + leagues join. RLS on user_leagues already filters by
   // auth.uid() so this only returns the signed-in user's subscriptions.
@@ -49,7 +55,8 @@ export default async function LeaguesPage() {
     };
   });
 
-  const atCap = leagues.length >= MAX_LEAGUES_PER_USER;
+  // Pro users are uncapped, so atCap stays false regardless of count.
+  const atCap = !isPro && leagues.length >= FREE_LEAGUE_CAP;
 
   // Relative time formatter for the "Last Sync" column. Same-day formats
   // ("just now", "5 mins ago") so users see immediate feedback after
@@ -81,14 +88,23 @@ export default async function LeaguesPage() {
           </p>
         </div>
         <div className="text-xs text-zinc-500">
-          {leagues.length} / {MAX_LEAGUES_PER_USER} leagues
+          {isPro
+            ? `${leagues.length} leagues · Pro (unlimited)`
+            : `${leagues.length} / ${FREE_LEAGUE_CAP} leagues · Free`}
         </div>
       </div>
 
       {atCap ? (
         <div className="rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-4 text-sm text-amber-900 dark:text-amber-200 mb-8">
-          You&apos;re at the {MAX_LEAGUES_PER_USER}-league limit. Remove a
-          league below to add another.
+          Free accounts are limited to {FREE_LEAGUE_CAP} league.{" "}
+          <Link
+            href="/pricing"
+            className="font-medium underline hover:no-underline"
+          >
+            Upgrade to Pro
+          </Link>{" "}
+          for unlimited leagues, or remove your current league below to swap
+          in another.
         </div>
       ) : (
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 mb-8">
