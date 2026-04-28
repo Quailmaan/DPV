@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScoringFormat } from "@/lib/dpv/types";
 import type { ReplacementByPosition } from "@/lib/dpv/scarcity";
 
@@ -493,19 +493,63 @@ function TradeSide({
   rosterLabel: string;
 }) {
   const [query, setQuery] = useState("");
+  // `focused` controls dropdown visibility. Without this, in league mode the
+  // dropdown auto-fills with the first 25 roster players the moment a team
+  // is picked and never closes — particularly bad on mobile where the
+  // auto-opened dropdown obscures the rest of the page. We now only render
+  // the dropdown when the search input is focused, and dismiss it on
+  // outside click / Escape / item selection.
+  const [focused, setFocused] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!focused) return;
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setFocused(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFocused(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [focused]);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // Picks aren't tracked per-roster yet, so they remain tradeable regardless
-    // of which team the user has scoped the search to.
-    const pool = players
-      .filter((p) => !taken.has(p.id))
-      .filter((p) =>
-        rosterPlayerIds ? rosterPlayerIds.has(p.id) || p.position === "PICK" : true,
+    const free = players.filter((p) => !taken.has(p.id));
+
+    if (rosterPlayerIds) {
+      // Team scoped: the dropdown should reflect THIS team's tradeable
+      // assets, not every pick in the league.
+      //
+      // Picks aren't tracked per-roster yet, so we deliberately omit them
+      // from the auto-populated roster view (otherwise every team appears
+      // to own every pick in the dropdown — confusing and inaccurate).
+      // Picks DO surface when the user types a query matching them
+      // (e.g. "2026" or "pick"), with a UI caveat that pick ownership
+      // isn't tracked yet — that's still useful for valuing a pick a user
+      // knows they own.
+      const rosterOnly = free.filter((p) => rosterPlayerIds.has(p.id));
+      if (!q) return rosterOnly.slice(0, 25);
+      const rosterMatches = rosterOnly.filter((p) =>
+        p.name.toLowerCase().includes(q),
       );
-    if (!q && !rosterPlayerIds) return [];
-    if (!q && rosterPlayerIds) return pool.slice(0, 25);
-    return pool.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 12);
+      const pickMatches = free.filter(
+        (p) => p.position === "PICK" && p.name.toLowerCase().includes(q),
+      );
+      return [...rosterMatches, ...pickMatches].slice(0, 12);
+    }
+
+    if (!q) return [];
+    return free.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 12);
   }, [query, players, taken, rosterPlayerIds]);
 
   const badgeColor =
@@ -560,11 +604,12 @@ function TradeSide({
         </div>
       )}
 
-      <div className="relative mb-3">
+      <div ref={containerRef} className="relative mb-3">
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setFocused(true)}
           placeholder={
             rosterPlayerIds
               ? "Filter this roster..."
@@ -572,48 +617,66 @@ function TradeSide({
           }
           className="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-1.5 text-sm"
         />
-        {matches.length > 0 && (
+        {focused && matches.length > 0 && (
           <div className="absolute z-10 mt-1 w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg overflow-hidden max-h-80 overflow-y-auto">
-            {matches.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => {
-                  setSide([...side, p]);
-                  setQuery("");
-                }}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-between gap-3"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="font-medium">{p.name}</span>
-                  <span
-                    className={`text-xs rounded px-1.5 py-0.5 font-mono ${
-                      p.position === "PICK"
-                        ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
-                        : "bg-zinc-100 dark:bg-zinc-800"
-                    }`}
-                  >
-                    {p.position}
-                  </span>
-                  {p.position !== "PICK" && (
-                    <span className="text-xs text-zinc-500">
-                      {p.team ?? "—"}
+            {matches.map((p) => {
+              // Picks aren't roster-tracked yet, so when one shows up in a
+              // team-scoped search we annotate it so users don't read the
+              // dropdown as "this team owns this pick."
+              const isUntrackedPick =
+                p.position === "PICK" && rosterPlayerIds !== null;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setSide([...side, p]);
+                    setQuery("");
+                    setFocused(false);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-between gap-3"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="font-medium truncate">{p.name}</span>
+                    <span
+                      className={`text-xs rounded px-1.5 py-0.5 font-mono flex-shrink-0 ${
+                        p.position === "PICK"
+                          ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+                          : "bg-zinc-100 dark:bg-zinc-800"
+                      }`}
+                    >
+                      {p.position}
                     </span>
-                  )}
-                  {(() => {
-                    const b = buySellBadge(p.marketDelta);
-                    return b ? (
-                      <span
-                        className={`text-[10px] font-bold tracking-wider px-1 py-0.5 rounded ${BUY_SELL_CLASS[b.tone]}`}
-                      >
-                        {b.label}
+                    {p.position !== "PICK" && (
+                      <span className="text-xs text-zinc-500 flex-shrink-0">
+                        {p.team ?? "—"}
                       </span>
-                    ) : null;
-                  })()}
-                </span>
-                <span className="tabular-nums font-semibold">{p.dpv}</span>
-              </button>
-            ))}
+                    )}
+                    {isUntrackedPick && (
+                      <span
+                        className="text-[10px] uppercase tracking-wider text-zinc-400 flex-shrink-0"
+                        title="Pick ownership isn't tracked per-team yet — verify your team actually owns this pick before trading."
+                      >
+                        verify owner
+                      </span>
+                    )}
+                    {(() => {
+                      const b = buySellBadge(p.marketDelta);
+                      return b ? (
+                        <span
+                          className={`text-[10px] font-bold tracking-wider px-1 py-0.5 rounded flex-shrink-0 ${BUY_SELL_CLASS[b.tone]}`}
+                        >
+                          {b.label}
+                        </span>
+                      ) : null;
+                    })()}
+                  </span>
+                  <span className="tabular-nums font-semibold flex-shrink-0">
+                    {p.dpv}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
