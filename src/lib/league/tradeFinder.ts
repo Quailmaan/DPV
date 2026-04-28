@@ -114,17 +114,24 @@ const MAX_ABS_VALUE_GIVEUP = 250;
 // flagged as needing the position.
 const NEED_THRESHOLD = 0.05;
 
-// Years-pro → market weight in the PYV/market blend. Rookies (yrs 0)
-// lean heaviest on market because PYV is essentially a prior with no
-// evidence yet; vets (yrs 3+) lean heaviest on PYV because we have
-// multi-season production data — market is mostly noise/hype at that
-// point. Numbers chosen to keep PYV the dominant signal at every
-// stage (the user explicitly wanted "PYV-leaning, market-checked").
+// Years-pro → market weight in the PYV/market blend. Rookies lean
+// heaviest on market because PYV is essentially a prior with no
+// evidence yet; vets lean a bit toward PYV because we have multi-
+// season production data — but market still gets ~40% even on vets
+// because that's what stops "JT for Baker Mayfield" trades: their
+// PYVs are similar but their FantasyCalc markets differ ~3×, and
+// without serious market weight the blend can't filter that.
+//
+// The weights below mean a vet with PYV 5000 / market 1800 ends up
+// at effective value ~3720 (60% × 5000 + 40% × 1800), which is far
+// enough below a true-5000-value player that the 15% imbalance gate
+// rejects the trade outright — no need for a separate "Market
+// disagrees" signal that surfaces bad trades anyway.
 function marketBlendWeight(yearsPro: number): number {
-  if (yearsPro <= 0) return 0.4;
-  if (yearsPro === 1) return 0.3;
-  if (yearsPro === 2) return 0.2;
-  return 0.15;
+  if (yearsPro <= 0) return 0.6;
+  if (yearsPro === 1) return 0.5;
+  if (yearsPro === 2) return 0.45;
+  return 0.4;
 }
 
 // Trade-level alignment tolerance. If pure-PYV delta and pure-market
