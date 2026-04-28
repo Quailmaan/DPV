@@ -84,13 +84,13 @@ export default async function PricingPage() {
             </Bullet>
             <Bullet pro>League-aware trade calculator</Bullet>
             <Bullet pro>Buy/Sell market signals</Bullet>
+            <Bullet pro>Roster report card (contender vs. rebuild)</Bullet>
           </ul>
           <div className="mb-6 rounded-md border border-emerald-200/60 dark:border-emerald-900/60 bg-emerald-100/40 dark:bg-emerald-950/30 p-3">
             <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-400 mb-1.5">
               Coming soon — included in Pro
             </div>
             <ul className="text-xs space-y-1 text-zinc-700 dark:text-zinc-300">
-              <ComingSoon>Roster report card (contender vs. rebuild verdict)</ComingSoon>
               <ComingSoon>Trade finder</ComingSoon>
               <ComingSoon>Sell-window indicator</ComingSoon>
               <ComingSoon>Weekly email digest</ComingSoon>

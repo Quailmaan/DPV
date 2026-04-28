@@ -1,6 +1,14 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth/session";
+import { getCurrentTier } from "@/lib/billing/tier";
+import {
+  computeReportCards,
+  type LeaguePick,
+  type Position,
+  type ReportPlayer,
+  type RosterInput,
+} from "@/lib/league/reportCard";
 import { createServerClient } from "@/lib/supabase/server";
 import type { ScoringFormat } from "@/lib/dpv/types";
 
@@ -38,13 +46,18 @@ export default async function LeagueDetailPage({
       .maybeSingle();
     if (!subscription) redirect("/league");
   }
-  const [leagueRes, rostersRes] = await Promise.all([
+  const [leagueRes, rostersRes, picksRes, tierState] = await Promise.all([
     sb.from("leagues").select("*").eq("league_id", id).maybeSingle(),
     sb
       .from("league_rosters")
       .select("*")
       .eq("league_id", id)
       .order("roster_id", { ascending: true }),
+    sb
+      .from("league_picks")
+      .select("season, round, owner_roster_id")
+      .eq("league_id", id),
+    getCurrentTier(),
   ]);
 
   if (leagueRes.error || !leagueRes.data) return notFound();
@@ -54,8 +67,23 @@ export default async function LeagueDetailPage({
     season: string;
     total_rosters: number;
     scoring_format: ScoringFormat;
+    roster_positions: string[] | null;
     synced_at: string;
   };
+  const isPro = tierState.tier === "pro";
+  // DB returns snake_case (owner_roster_id) — map to the camelCase shape
+  // the calculator expects.
+  const leaguePicks: LeaguePick[] = (
+    (picksRes.data ?? []) as Array<{
+      season: number;
+      round: number;
+      owner_roster_id: number;
+    }>
+  ).map((p) => ({
+    season: p.season,
+    round: p.round,
+    ownerRosterId: p.owner_roster_id,
+  }));
   const rosters = (rostersRes.data ?? []) as Array<{
     league_id: string;
     roster_id: number;
@@ -168,6 +196,45 @@ export default async function LeagueDetailPage({
     ? rosters.find((r) => r.roster_id === focusedTeam.rosterId) ?? null
     : null;
 
+  // Compute report cards once for every roster — cheap pure-fn pass
+  // over data we already have. Used to render verdict badges in the
+  // rankings table. The full breakdown (composite + sub-scores) lives
+  // on the per-team /report page and is Pro-gated there.
+  const picksByRoster = new Map<number, LeaguePick[]>();
+  for (const p of leaguePicks) {
+    const arr = picksByRoster.get(p.ownerRosterId) ?? [];
+    arr.push(p);
+    picksByRoster.set(p.ownerRosterId, arr);
+  }
+  const rosterInputs: RosterInput[] = rosters.map((r) => {
+    const players: ReportPlayer[] = [];
+    for (const pid of r.player_ids) {
+      const s = snapMap.get(pid);
+      if (!s || !s.players) continue;
+      const pos = s.players.position;
+      if (pos !== "QB" && pos !== "RB" && pos !== "WR" && pos !== "TE") continue;
+      players.push({
+        playerId: pid,
+        name: s.players.name,
+        position: pos as Position,
+        birthdate: s.players.birthdate,
+        dpv: s.dpv,
+      });
+    }
+    return {
+      rosterId: r.roster_id,
+      ownerName: r.owner_display_name ?? `Team ${r.roster_id}`,
+      teamName: r.team_name,
+      players,
+      picks: picksByRoster.get(r.roster_id) ?? [],
+    };
+  });
+  const reportCards = computeReportCards(rosterInputs, {
+    rosterPositions: league.roster_positions,
+    totalRosters: league.total_rosters,
+  });
+  const cardByRoster = new Map(reportCards.map((c) => [c.rosterId, c]));
+
   function ageFrom(bd: string | null): string {
     if (!bd) return "—";
     const y =
@@ -236,7 +303,7 @@ export default async function LeagueDetailPage({
 
       <h2 className="text-sm font-semibold mb-3">Power Rankings</h2>
       <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 mb-8">
-        <table className="w-full text-sm min-w-[560px]">
+        <table className="w-full text-sm min-w-[680px]">
           <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
             <tr>
               <th className="px-3 py-2 text-left w-10">#</th>
@@ -247,6 +314,8 @@ export default async function LeagueDetailPage({
               <th className="px-3 py-2 text-right">WR</th>
               <th className="px-3 py-2 text-right">TE</th>
               <th className="px-3 py-2 text-left">Top Player</th>
+              <th className="px-3 py-2 text-left">Verdict</th>
+              <th className="px-3 py-2" />
             </tr>
           </thead>
           <tbody>
@@ -313,12 +382,44 @@ export default async function LeagueDetailPage({
                       </span>
                     )}
                   </td>
+                  <td className="px-3 py-2">
+                    <VerdictPill
+                      tone={cardByRoster.get(s.rosterId)?.tone ?? "neutral"}
+                      label={cardByRoster.get(s.rosterId)?.verdict ?? "—"}
+                      score={
+                        isPro
+                          ? cardByRoster.get(s.rosterId)?.composite ?? null
+                          : null
+                      }
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Link
+                      href={`/league/${id}/team/${s.rosterId}/report`}
+                      className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline whitespace-nowrap"
+                    >
+                      Report →
+                    </Link>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {!isPro && (
+        <div className="-mt-6 mb-8 text-xs text-zinc-500">
+          Verdict labels are free —{" "}
+          <Link
+            href="/pricing"
+            className="text-emerald-700 dark:text-emerald-400 hover:underline"
+          >
+            upgrade to Pro
+          </Link>{" "}
+          to see composite scores, sub-score breakdowns, and recommended
+          actions per team.
+        </div>
+      )}
 
       {focusedTeam && focusedRoster && (
         <div className="mb-8">
@@ -461,5 +562,37 @@ export default async function LeagueDetailPage({
         </table>
       </div>
     </div>
+  );
+}
+
+// Verdict pill — compact version of the badge on the full report page.
+// `score` is null for free users (we hide the number but show the label,
+// which is the upgrade pitch). Pro users see "Win-now contender · 87".
+function VerdictPill({
+  tone,
+  label,
+  score,
+}: {
+  tone: "elite" | "good" | "neutral" | "warn" | "bad";
+  label: string;
+  score: number | null;
+}) {
+  const cls: Record<typeof tone, string> = {
+    elite:
+      "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
+    good: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
+    neutral: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+    warn: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
+    bad: "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${cls[tone]} whitespace-nowrap`}
+    >
+      <span>{label}</span>
+      {score !== null && (
+        <span className="font-bold tabular-nums opacity-80">{score}</span>
+      )}
+    </span>
   );
 }
