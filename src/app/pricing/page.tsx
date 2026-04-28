@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentSession } from "@/lib/auth/session";
 import { getCurrentTier } from "@/lib/billing/tier";
+import { SUPPORT_EMAIL, mailtoHref } from "@/lib/site/contact";
 import CheckoutButton from "./CheckoutButton";
 
 // Public pricing page. Free is the entry tier — site read access, 1
@@ -123,7 +124,14 @@ export default async function PricingPage() {
 
       <div className="mt-10 text-center text-xs text-zinc-500 max-w-md mx-auto">
         Payments processed by Stripe. We don&apos;t store your card. Cancel
-        anytime from your account page.
+        anytime from your account page.{" "}
+        <a
+          href={mailtoHref("Pylon billing question")}
+          className="underline hover:text-zinc-900 dark:hover:text-zinc-100"
+        >
+          {SUPPORT_EMAIL}
+        </a>{" "}
+        for billing questions.
       </div>
     </div>
   );

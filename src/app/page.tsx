@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getCurrentSession } from "@/lib/auth/session";
 import { createServerClient } from "@/lib/supabase/server";
 import type { ScoringFormat } from "@/lib/dpv/types";
 
@@ -30,8 +31,12 @@ export default async function RankingsPage({
   const pos = (sp.pos || "ALL").toUpperCase();
   const q = (sp.q ?? "").trim();
 
+  // Anonymous-visitor hero only renders when signed-out, so we resolve
+  // the session up front. Signed-in users skip the marketing block and
+  // go straight to rankings.
   const sb = await createServerClient();
-  const [snapshotsRes, marketRes] = await Promise.all([
+  const [session, snapshotsRes, marketRes] = await Promise.all([
+    getCurrentSession(),
     sb
       .from("dpv_snapshots")
       .select(
@@ -135,6 +140,7 @@ export default async function RankingsPage({
 
   return (
     <div>
+      {!session && <MarketingHero />}
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">
           Dynasty Rankings
@@ -292,5 +298,95 @@ export default async function RankingsPage({
         </div>
       )}
     </div>
+  );
+}
+
+// Marketing hero — only rendered for signed-out visitors. The pitch in
+// 3 beats: what Pylon is, what makes it different (the data), and what
+// you actually do with it (Pro features that turn the data into
+// decisions). The actual rankings table sits below the hero so the
+// data is visible immediately — the page works as a teaser without
+// anyone reading the hero.
+function MarketingHero() {
+  return (
+    <div className="mb-8 rounded-lg border border-emerald-200/70 dark:border-emerald-900/60 bg-gradient-to-br from-emerald-50/80 to-white dark:from-emerald-950/30 dark:to-zinc-950/40 p-6 sm:p-8">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6 items-start">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-400 mb-2">
+            Dynasty fantasy values, calibrated to your league
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight mb-3">
+            Stop guessing whether to trade.
+            <span className="block text-zinc-500 text-base sm:text-lg font-normal mt-1">
+              Pylon scores every dynasty player on production, age, and
+              opportunity, then tells you when to sell, who to target,
+              and which trades actually move your team.
+            </span>
+          </h1>
+          <div className="flex flex-wrap gap-2 mt-4">
+            <Link
+              href="/signup"
+              className="inline-block text-sm font-medium px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              Create free account
+            </Link>
+            <Link
+              href="/pricing"
+              className="inline-block text-sm font-medium px-4 py-2 rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              See Pro features — $7/mo
+            </Link>
+          </div>
+          <p className="text-xs text-zinc-500 mt-3">
+            Free includes the full PYV rankings, rookie board, 1 synced
+            Sleeper league, and the universal trade calc. Pro adds the
+            decision tools below.
+          </p>
+        </div>
+        <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 p-4 backdrop-blur">
+          <div className="text-xs uppercase tracking-wider font-semibold text-zinc-500 mb-3">
+            What Pro unlocks
+          </div>
+          <ul className="text-sm space-y-2">
+            <HeroBullet>
+              <strong>Sell-window flags</strong> on every player — sell
+              now, peak hold, buy
+            </HeroBullet>
+            <HeroBullet>
+              <strong>Roster report card</strong> with composite 0-100
+              score per team
+            </HeroBullet>
+            <HeroBullet>
+              <strong>Trade finder</strong> — fair-value ideas tailored
+              to your roster
+            </HeroBullet>
+            <HeroBullet>
+              <strong>League-aware trade calc</strong> with traded picks +
+              league scoring
+            </HeroBullet>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeroBullet({ children }: { children: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-2">
+      <svg
+        className="h-4 w-4 flex-shrink-0 mt-0.5 text-emerald-600"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M5 12l5 5L20 7" />
+      </svg>
+      <span className="text-zinc-700 dark:text-zinc-300">{children}</span>
+    </li>
   );
 }

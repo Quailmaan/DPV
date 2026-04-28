@@ -1,6 +1,7 @@
 import { requireSession } from "@/lib/auth/session";
 import { getCurrentTier } from "@/lib/billing/tier";
 import { createServerClient } from "@/lib/supabase/server";
+import { SUPPORT_EMAIL, mailtoHref } from "@/lib/site/contact";
 import ChangePasswordForm from "./ChangePasswordForm";
 import ChangeUsernameForm from "./ChangeUsernameForm";
 import SubscriptionSection from "./SubscriptionSection";
@@ -49,10 +50,20 @@ export default async function AccountPage({
         <ChangeUsernameForm currentUsername={session.username} />
       </section>
 
-      <section className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <section className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 mb-6">
         <h2 className="text-sm font-semibold mb-3">Password</h2>
         <ChangePasswordForm />
       </section>
+
+      <div className="text-xs text-zinc-500">
+        Need help with billing or your account?{" "}
+        <a
+          href={mailtoHref("Pylon account help")}
+          className="underline hover:text-zinc-700 dark:hover:text-zinc-300"
+        >
+          {SUPPORT_EMAIL}
+        </a>
+      </div>
     </div>
   );
 }

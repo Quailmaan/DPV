@@ -782,9 +782,15 @@ function TradeIdeaCard({
       : idea.myDpvDelta < 0
       ? "text-amber-700 dark:text-amber-400"
       : "text-zinc-500";
-  // Trade calc accepts league + from today. Once it accepts a target
-  // partner + pre-loaded sides we can prefill the whole trade here.
-  const tradeHref = `/trade?league=${leagueId}&from=${fromRosterId}`;
+  // Deep-link the trade calc with the entire trade pre-staged. The
+  // calc honors `from` / `to` / `give` / `receive` so the user lands on
+  // a fully-loaded trade — they just need to verify or hit send.
+  const tradeHref =
+    `/trade?league=${leagueId}` +
+    `&from=${fromRosterId}` +
+    `&to=${idea.partnerRosterId}` +
+    `&give=${encodeURIComponent(idea.give.playerId)}` +
+    `&receive=${encodeURIComponent(idea.receive.playerId)}`;
   return (
     <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
       <div className="flex items-baseline justify-between mb-1">

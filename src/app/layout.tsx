@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import HeaderAuth from "@/components/HeaderAuth";
 import { PylonWordmark } from "@/components/PylonLogo";
+import { SUPPORT_EMAIL, mailtoHref } from "@/lib/site/contact";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -135,6 +136,34 @@ export default async function RootLayout({
             <main className="mx-auto max-w-6xl w-full px-3 sm:px-6 py-6 sm:py-8 flex-1">
               {children}
             </main>
+            <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+              <div className="mx-auto max-w-6xl px-3 sm:px-6 py-5 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
+                <div>
+                  © {new Date().getFullYear()} Pylon. Dynasty values for
+                  fantasy managers.
+                </div>
+                <nav className="flex flex-wrap gap-x-4 gap-y-1">
+                  <Link
+                    href="/methodology"
+                    className="hover:text-zinc-900 dark:hover:text-zinc-100"
+                  >
+                    Methodology
+                  </Link>
+                  <Link
+                    href="/pricing"
+                    className="hover:text-zinc-900 dark:hover:text-zinc-100"
+                  >
+                    Pricing
+                  </Link>
+                  <a
+                    href={mailtoHref("Pylon support")}
+                    className="hover:text-zinc-900 dark:hover:text-zinc-100"
+                  >
+                    {SUPPORT_EMAIL}
+                  </a>
+                </nav>
+              </div>
+            </footer>
           </>
         )}
       </body>

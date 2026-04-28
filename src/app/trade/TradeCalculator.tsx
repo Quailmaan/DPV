@@ -318,6 +318,9 @@ export default function TradeCalculator({
   leagueId,
   rosterOptions,
   defaultFromRosterId,
+  defaultToRosterId,
+  defaultGiveIds,
+  defaultReceiveIds,
   replacement,
   replacementContext,
 }: {
@@ -326,6 +329,12 @@ export default function TradeCalculator({
   leagueId: string | null;
   rosterOptions: LeagueRosterOption[];
   defaultFromRosterId: number | null;
+  /** Deep-link partner — pre-loads the receiving roster filter. */
+  defaultToRosterId: number | null;
+  /** Deep-link give side — comma-split player ids prestaged on the give pile. */
+  defaultGiveIds: string[];
+  /** Deep-link receive side — same shape as give. */
+  defaultReceiveIds: string[];
   /** League-aware replacement DPV per position. Drives VAR + verdict. */
   replacement: ReplacementByPosition;
   /** Metadata for the scarcity tooltip — explains where the cliff came from. */
@@ -335,17 +344,45 @@ export default function TradeCalculator({
     isDefault: boolean;
   };
 }) {
-  const [giving, setGiving] = useState<TradePlayer[]>([]);
-  const [getting, setGetting] = useState<TradePlayer[]>([]);
+  // Resolve the prefill ids → real player records once. Unresolved ids
+  // (player not in this format's pool, e.g. retired) just get dropped
+  // — we don't surface a broken prefill to the user.
+  const playersById = useMemo(() => {
+    const m = new Map<string, TradePlayer>();
+    for (const p of players) m.set(p.id, p);
+    return m;
+  }, [players]);
+  const initialGiving = useMemo(
+    () =>
+      defaultGiveIds
+        .map((id) => playersById.get(id))
+        .filter((p): p is TradePlayer => p !== undefined),
+    [defaultGiveIds, playersById],
+  );
+  const initialGetting = useMemo(
+    () =>
+      defaultReceiveIds
+        .map((id) => playersById.get(id))
+        .filter((p): p is TradePlayer => p !== undefined),
+    [defaultReceiveIds, playersById],
+  );
+
+  const [giving, setGiving] = useState<TradePlayer[]>(initialGiving);
+  const [getting, setGetting] = useState<TradePlayer[]>(initialGetting);
   const [fromRoster, setFromRoster] = useState<number | null>(
     defaultFromRosterId,
   );
-  const [toRoster, setToRoster] = useState<number | null>(null);
+  const [toRoster, setToRoster] = useState<number | null>(defaultToRosterId);
 
-  // Sync URL param -> local state if user navigated here with ?from=X.
+  // Sync URL param -> local state if user navigated here with ?from=X
+  // or ?to=X. Initial-state defaults handle the first paint; this keeps
+  // soft-nav between leagues from leaving stale roster filters.
   useEffect(() => {
     if (defaultFromRosterId !== null) setFromRoster(defaultFromRosterId);
   }, [defaultFromRosterId]);
+  useEffect(() => {
+    if (defaultToRosterId !== null) setToRoster(defaultToRosterId);
+  }, [defaultToRosterId]);
 
   const taken = useMemo(
     () => new Set([...giving, ...getting].map((p) => p.id)),

@@ -40,6 +40,12 @@ type SearchParams = Promise<{
   fmt?: string;
   league?: string;
   from?: string;
+  // Deep-link prefill — used by the trade-finder cards on the league
+  // page. `to` is the partner roster id; `give` / `receive` are
+  // comma-separated player ids that the trade calc should pre-stage.
+  to?: string;
+  give?: string;
+  receive?: string;
 }>;
 
 function isScoringFormat(v: string | undefined): v is ScoringFormat {
@@ -53,6 +59,17 @@ export default async function TradePage({
 }) {
   const sp = await searchParams;
   const fromRosterId = sp.from ?? null;
+  const toRosterId = sp.to ?? null;
+  // Comma-separated id lists. Empty strings collapse to []; the trade
+  // calculator just ignores ids that don't match a player.
+  const giveIds = (sp.give ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const receiveIds = (sp.receive ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 
   // Pro gates: league-aware mode (per-team rosters, traded picks) and the
   // Buy/Sell market-delta flags both require Pro. Free users get the same
@@ -387,6 +404,7 @@ export default async function TradePage({
     );
 
   const fromId = fromRosterId ? Number(fromRosterId) : null;
+  const toId = toRosterId ? Number(toRosterId) : null;
 
   return (
     <div>
@@ -428,6 +446,9 @@ export default async function TradePage({
         leagueId={requestedLeague}
         rosterOptions={rosterOptions}
         defaultFromRosterId={fromId && Number.isFinite(fromId) ? fromId : null}
+        defaultToRosterId={toId && Number.isFinite(toId) ? toId : null}
+        defaultGiveIds={giveIds}
+        defaultReceiveIds={receiveIds}
         replacement={replacement}
         replacementContext={{
           teamCount,
