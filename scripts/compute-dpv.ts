@@ -375,6 +375,127 @@ async function main() {
     return row.snap_share_pct ?? null;
   }
 
+  // ── QB role-confidence factors ──────────────────────────────────────
+  //
+  // The ≥7g qualifying filter in BPS hides backup seasons — a 17g
+  // starter year followed by 1g + 0g looks identical to a starter who
+  // got injured. Combined with QB opportunity being hard-coded to 1.0
+  // (src/lib/dpv/opportunity.ts:14), the model has no way to tell a
+  // current backup from a starter without these signals.
+  //
+  // Two separate factors, both ≤ 1.0, both applied multiplicatively
+  // inside the engine:
+  //
+  //   A. starterRate — fraction of last 2 seasons spent as the team's
+  //      starter (snap_share ≥ 60% AND ≥ 3g per season). Catches career
+  //      backups whose only qualifying BPS season is a stale starter
+  //      year (Howell '23, Dobbs '23 Passtronaut tour).
+  //
+  //   B. depthChart — penalty when another QB on the player's
+  //      current_team has stronger 2-yr starter evidence + a draft-
+  //      capital bonus for recent R1/R2 picks. Catches displaced
+  //      starters who signed elsewhere as the QB2 (Tua → ATL behind
+  //      a recent R1 in Penix).
+
+  const QB_LOOKBACK_SEASONS = 2;
+  const QB_STARTER_SNAP_PCT = 60;
+  const QB_STARTER_MIN_GAMES = 3;
+
+  // Count games where the QB clearly held the starting job. snap_share is
+  // stored as a percent (e.g. 95.4), so the threshold is in percent terms.
+  function qbStarterGames(
+    rows: typeof seasons,
+    fromSeason: number,
+    toSeason: number,
+  ): number {
+    let games = 0;
+    for (const r of rows) {
+      if (r.season < fromSeason || r.season > toSeason) continue;
+      const snap = r.snap_share_pct ?? 0;
+      if (snap >= QB_STARTER_SNAP_PCT && r.games_played >= QB_STARTER_MIN_GAMES) {
+        games += r.games_played;
+      }
+    }
+    return games;
+  }
+
+  function qbStarterRateMultFor(
+    p: (typeof players)[number],
+    rows: typeof seasons,
+  ): number {
+    if (p.position !== "QB") return 1.0;
+    // Window is the last QB_LOOKBACK_SEASONS completed seasons. With
+    // CURRENT_SEASON = most-recently-completed (per constants.ts), that's
+    // [CURRENT_SEASON - 1, CURRENT_SEASON]. Floor by draft_year so a recent
+    // rookie isn't penalized for seasons before they entered the league.
+    const draftYear = p.draft_year ?? 0;
+    const fromSeason = Math.max(
+      CURRENT_SEASON - QB_LOOKBACK_SEASONS + 1,
+      draftYear,
+    );
+    const toSeason = CURRENT_SEASON;
+    const seasonsInWindow = toSeason - fromSeason + 1;
+    if (seasonsInWindow <= 0) return 1.0;
+    const possibleGames = seasonsInWindow * 17;
+    const games = qbStarterGames(rows, fromSeason, toSeason);
+    const rate = games / possibleGames;
+    if (rate >= 0.5) return 1.0;
+    if (rate <= 0.1) return 0.55;
+    // Linear ramp 0.10 → 0.50 maps 0.55 → 1.0
+    return 0.55 + ((rate - 0.1) / 0.4) * (1.0 - 0.55);
+  }
+
+  // Pre-compute depth-chart penalty per QB. R1/R2 picks from the last 3
+  // draft classes get a starter-equivalent bonus even with limited NFL
+  // snaps — a vet signing behind a young R1 (Penix-style) should be
+  // flagged as the QB2 even if the rookie has fewer real starts than
+  // the vet's prior team did. A 3-year window covers (CURRENT_SEASON-2)
+  // through (CURRENT_SEASON), so a 2024 R1 still registers as franchise
+  // capital when ranking 2026: their team is committed.
+  const QB_R1_DRAFT_BONUS = 17;
+  const QB_R2_DRAFT_BONUS = 8;
+  const QB_DRAFT_BONUS_LOOKBACK = 2; // years before CURRENT_SEASON
+  const QB_DEPTH_MIN_TEAM_MAX = 12; // need clear evidence the other guy starts
+  const QB_DEPTH_GAP = 5; // I'm in the running if within 5 games of leader
+  const QB_DEPTH_PENALTY = 0.5;
+
+  type QBScore = { player_id: string; score: number };
+  const qbScoresByTeam = new Map<string, QBScore[]>();
+  for (const p of players) {
+    if (p.position !== "QB" || !p.current_team) continue;
+    const rows = byPlayer.get(p.player_id) ?? [];
+    let score = qbStarterGames(
+      rows,
+      CURRENT_SEASON - QB_LOOKBACK_SEASONS + 1,
+      CURRENT_SEASON,
+    );
+    if (
+      (p.draft_year ?? 0) >= CURRENT_SEASON - QB_DRAFT_BONUS_LOOKBACK &&
+      p.draft_round !== null
+    ) {
+      if (p.draft_round === 1) score += QB_R1_DRAFT_BONUS;
+      else if (p.draft_round === 2) score += QB_R2_DRAFT_BONUS;
+    }
+    const arr = qbScoresByTeam.get(p.current_team) ?? [];
+    arr.push({ player_id: p.player_id, score });
+    qbScoresByTeam.set(p.current_team, arr);
+  }
+  const qbDepthMultByPlayer = new Map<string, number>();
+  for (const arr of qbScoresByTeam.values()) {
+    if (arr.length <= 1) {
+      for (const x of arr) qbDepthMultByPlayer.set(x.player_id, 1.0);
+      continue;
+    }
+    const teamMax = Math.max(...arr.map((x) => x.score));
+    for (const x of arr) {
+      if (teamMax < QB_DEPTH_MIN_TEAM_MAX || x.score >= teamMax - QB_DEPTH_GAP) {
+        qbDepthMultByPlayer.set(x.player_id, 1.0);
+      } else {
+        qbDepthMultByPlayer.set(x.player_id, QB_DEPTH_PENALTY);
+      }
+    }
+  }
+
   // Recency floor for opportunity inputs. By default we read the most-recent
   // season's opportunity metrics, but when an established player (3+ qualifying
   // seasons in the last 3 yrs) has a disrupted latest season (<14 games), use
@@ -617,9 +738,19 @@ async function main() {
     }
 
     const mostRecent = rawSeasons[0];
-    // Skip retired players — only rank players with a qualifying season
-    // within the last 2 years.
-    if (mostRecent.season < CURRENT_SEASON - 1) {
+    // Skip retired players — defined as no NFL action (qualifying or not)
+    // within the last 2 seasons. The skip used to look at mostRecent (the
+    // ≥7g-filtered list), which incorrectly retired QBs whose only recent
+    // games were as backups — Sam Howell's 2024 was 1g for SEA, Dobbs'
+    // 2025 was 4g for NE. Both got frozen at their 2023 starter-year
+    // scores instead of being penalized as current backups. Use the
+    // unfiltered last season so they flow through and qbStarterRateMult
+    // can do its job.
+    const lastAnySeason = allSeasons.reduce(
+      (m, s) => (s.season > m ? s.season : m),
+      0,
+    );
+    if (lastAnySeason < CURRENT_SEASON - 1) {
       skipped++;
       continue;
     }
@@ -651,6 +782,15 @@ async function main() {
       selfThreatVet,
     );
 
+    // QB role-confidence — only meaningful for QBs. For other positions
+    // both default to 1.0.
+    const qbStarterRateMult =
+      p.position === "QB" ? qbStarterRateMultFor(p, rawSeasons) : 1.0;
+    const qbDepthChartMult =
+      p.position === "QB"
+        ? qbDepthMultByPlayer.get(p.player_id) ?? 1.0
+        : 1.0;
+
     for (const fmt of FORMATS) {
       const input: DPVInput = {
         profile: {
@@ -669,6 +809,8 @@ async function main() {
         },
         scoringFormat: fmt,
         rookieDisplacementMult,
+        qbStarterRateMult,
+        qbDepthChartMult,
         precomputedHSM: hsmSummary
           ? {
               meanNextPPG: hsmSummary.meanNextPPG,

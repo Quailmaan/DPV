@@ -59,7 +59,15 @@ export function calculateDPV(input: DPVInput): DPVResult {
 
   const sfw = SCORING_FORMAT_WEIGHTS[position][scoringFormat];
 
-  const dpvRaw = bps * am * os * olqi * qqs * bbcs * sfw;
+  // QB role-confidence multipliers. Both default 1.0 (no penalty) for
+  // non-QBs and for QBs without enough evidence to penalize. They multiply
+  // — a career backup on a team with a clear starter ahead of him eats
+  // both. See types.ts for what each captures.
+  const qbStarterRate = input.qbStarterRateMult ?? 1.0;
+  const qbDepthChart = input.qbDepthChartMult ?? 1.0;
+
+  const dpvRaw =
+    bps * am * os * olqi * qqs * bbcs * sfw * qbStarterRate * qbDepthChart;
 
   const hsm = runHSM(input);
   const hsmBlend = hsmBlendWeight(hsm.confidence);
@@ -96,6 +104,8 @@ export function calculateDPV(input: DPVInput): DPVResult {
     scoringFormatWeight: sfw,
     scarcityMultiplier: scarcity,
     rookieDisplacementMult: rookieDisplacement,
+    qbStarterRateMult: qbStarterRate,
+    qbDepthChartMult: qbDepthChart,
     dpvRaw,
     dpvProjected,
     dpvFinal: scaled,

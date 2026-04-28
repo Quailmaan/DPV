@@ -82,6 +82,24 @@ export interface DPVInput {
   // team+position rookie threat from the draft-capital curve and passes in.
   // Omit or pass 1.0 when there's no incoming rookie threat.
   rookieDisplacementMult?: number;
+  // QB-only "is this guy actually going to start" multipliers (≤ 1.0). The
+  // ≥7g qualifying filter in BPS hides backup seasons (a 17g starter year
+  // followed by 1g + 0g looks identical to a starter who got injured), and
+  // QB opportunity is hard-coded to 1.0, so without these the model can't
+  // tell a current backup from a starter.
+  //
+  //   qbStarterRateMult — fraction of last 2 yrs where the player was the
+  //                       team's starter (snap_share > 60% AND ≥3g). Catches
+  //                       career backups (Howell, Dobbs).
+  //   qbDepthChartMult  — penalty when another QB on current_team has
+  //                       stronger starter evidence (recent starter games +
+  //                       R1-pick bonus). Catches displaced starters who
+  //                       signed elsewhere as the QB2 (Tua → ATL).
+  //
+  // Both default to 1.0 for non-QBs and for QBs where neither signal fires.
+  // They multiply together — a player can be hit by both.
+  qbStarterRateMult?: number;
+  qbDepthChartMult?: number;
 }
 
 export interface DPVBreakdown {
@@ -94,6 +112,8 @@ export interface DPVBreakdown {
   scoringFormatWeight: number;
   scarcityMultiplier: number;
   rookieDisplacementMult: number;
+  qbStarterRateMult: number;
+  qbDepthChartMult: number;
   dpvRaw: number;
   dpvProjected: number;
   dpvFinal: number;
