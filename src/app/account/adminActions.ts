@@ -57,6 +57,86 @@ async function ensureAdmin(): Promise<{ ok: true } | AdminFormState> {
   return { ok: true };
 }
 
+// ----------------- user list -----------------
+
+export type AdminUserRow = {
+  userId: string;
+  username: string;
+  email: string | null;
+  tier: "free" | "pro";
+  // True when the Pro grant came from this admin panel (synthetic
+  // admin_grant_ row) rather than a real Stripe subscription. The UI
+  // uses this to show the right action button (Revoke vs. "managed in
+  // Stripe").
+  isAdminGrant: boolean;
+};
+
+// Load every Pylon user with their tier + Pro source. Admin-only (the
+// session check is duplicated server-side so a non-admin who somehow
+// got the import path can't pull the email list). Joins three sources:
+//   - public.profiles      → username, user_id
+//   - auth.users           → email (admin client only)
+//   - public.subscriptions → status, stripe_customer_id (for tier + source)
+//
+// Single perPage=1000 page covers Pylon for a long while; revisit if
+// the user count outgrows that.
+export async function loadAdminUserList(): Promise<AdminUserRow[]> {
+  const guard = await ensureAdmin();
+  if ("error" in guard) return [];
+
+  const admin = createAdminClient();
+
+  const [profilesRes, subsRes, authRes] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("user_id, username")
+      .order("username", { ascending: true }),
+    admin
+      .from("subscriptions")
+      .select("user_id, status, stripe_customer_id"),
+    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+  ]);
+
+  const profiles = (profilesRes.data ?? []) as Array<{
+    user_id: string;
+    username: string;
+  }>;
+  const subs = (subsRes.data ?? []) as Array<{
+    user_id: string;
+    status: string | null;
+    stripe_customer_id: string | null;
+  }>;
+
+  // Sub state per user: derived tier + whether it's an admin grant.
+  type SubState = { tier: "free" | "pro"; isAdminGrant: boolean };
+  const subMap = new Map<string, SubState>();
+  for (const s of subs) {
+    const status = s.status ?? "";
+    const tier: "free" | "pro" =
+      status === "active" || status === "trialing" ? "pro" : "free";
+    subMap.set(s.user_id, {
+      tier,
+      isAdminGrant: !!s.stripe_customer_id?.startsWith("admin_grant_"),
+    });
+  }
+
+  const emailMap = new Map<string, string>();
+  for (const u of authRes.data?.users ?? []) {
+    if (u.email) emailMap.set(u.id, u.email);
+  }
+
+  return profiles.map((p) => {
+    const sub = subMap.get(p.user_id);
+    return {
+      userId: p.user_id,
+      username: p.username,
+      email: emailMap.get(p.user_id) ?? null,
+      tier: sub?.tier ?? "free",
+      isAdminGrant: sub?.isAdminGrant ?? false,
+    };
+  });
+}
+
 // Grant Pro to a user by username. Idempotent — if the user already has
 // an admin_grant_ row we just refresh status; if they have a real Stripe
 // row we refuse rather than corrupt billing state.

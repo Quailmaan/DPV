@@ -3,6 +3,7 @@ import { getCurrentTier } from "@/lib/billing/tier";
 import { createServerClient } from "@/lib/supabase/server";
 import { SUPPORT_EMAIL, mailtoHref } from "@/lib/site/contact";
 import AdminGrantProPanel from "./AdminGrantProPanel";
+import { loadAdminUserList } from "./adminActions";
 import ChangeEmailForm from "./ChangeEmailForm";
 import ChangePasswordForm from "./ChangePasswordForm";
 import ChangeUsernameForm from "./ChangeUsernameForm";
@@ -24,6 +25,11 @@ export default async function AccountPage({
     loadEmailPrefs(),
   ]);
 
+  // Admin-only user list. Only loaded for admins so non-admins don't pay
+  // the auth.users round-trip on every page load. The action itself
+  // re-checks is_admin server-side as defense in depth.
+  const adminUsers = session.isAdmin ? await loadAdminUserList() : [];
+
   // Pull the price_id alongside so the section can label "Pro Monthly"
   // vs "Pro Yearly" without re-querying Stripe.
   const sb = await createServerClient();
@@ -33,8 +39,15 @@ export default async function AccountPage({
     .eq("user_id", session.userId)
     .maybeSingle();
 
+  // Admin gets a wider canvas so the user-list table fits without
+  // horizontal crunch; regular users keep the narrower form-friendly
+  // column.
+  const containerClass = session.isAdmin
+    ? "max-w-3xl mx-auto"
+    : "max-w-md mx-auto";
+
   return (
-    <div className="max-w-md mx-auto">
+    <div className={containerClass}>
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Account</h1>
         <p className="text-sm text-zinc-500 mt-1">
@@ -73,7 +86,7 @@ export default async function AccountPage({
         />
       </section>
 
-      {session.isAdmin && <AdminGrantProPanel />}
+      {session.isAdmin && <AdminGrantProPanel users={adminUsers} />}
 
       <div className="text-xs text-zinc-500">
         Need help with billing or your account?{" "}
