@@ -892,6 +892,79 @@ async function main() {
     }
   }
   console.log(`  wrote ${combined.length} snapshots`);
+
+  // Cleanup pass: delete snapshots for players we didn't compute this run.
+  // The script only upserts, so without this any player who retires (or is
+  // otherwise dropped from the active set) keeps their last computed DPV
+  // forever — Tom Brady was still showing up at DPV 3395 long after he hung
+  // it up. The skip-set is "every player_id present in dpv_snapshots that
+  // isn't in the freshly computed `combined`."
+  const writtenIds = new Set(combined.map((c) => c.player_id));
+  const existingIds = new Set<string>();
+  {
+    const PAGE = 1000;
+    for (let offset = 0; ; offset += PAGE) {
+      const { data, error } = await sb
+        .from("dpv_snapshots")
+        .select("player_id")
+        .range(offset, offset + PAGE - 1);
+      if (error) {
+        console.error("Cleanup scan error:", error);
+        process.exit(1);
+      }
+      if (!data || data.length === 0) break;
+      for (const r of data) existingIds.add(r.player_id);
+      if (data.length < PAGE) break;
+    }
+  }
+  const stalePlayerIds = [...existingIds].filter((id) => !writtenIds.has(id));
+  // Guard against a catastrophic run wiping everyone — refuse if more than
+  // half the existing player set would be deleted. The first run after
+  // adding cleanup will hit ~40% (years of accumulated retired-player
+  // backlog); after that it should be a handful per offseason.
+  const STALE_FRACTION_LIMIT = 0.5;
+  if (
+    existingIds.size > 0 &&
+    stalePlayerIds.length / existingIds.size > STALE_FRACTION_LIMIT
+  ) {
+    console.error(
+      `Refusing to delete ${stalePlayerIds.length}/${existingIds.size} (${(
+        (stalePlayerIds.length / existingIds.size) *
+        100
+      ).toFixed(1)}%) of snapshots — that's above the ${(
+        STALE_FRACTION_LIMIT * 100
+      ).toFixed(0)}% safety threshold. Investigate the compute step before re-running.`,
+    );
+    process.exit(1);
+  }
+  if (stalePlayerIds.length > 0) {
+    // Print a sample of who's getting cut so a human can spot-check.
+    const samplePlayers = await sb
+      .from("players")
+      .select("player_id, name, position, current_team")
+      .in("player_id", stalePlayerIds.slice(0, 20));
+    if (samplePlayers.data) {
+      console.log("Sample of stale players to delete:");
+      for (const p of samplePlayers.data) {
+        console.log(`  ${p.position} ${p.name} (team ${p.current_team ?? "—"})`);
+      }
+    }
+    console.log(`Deleting ${stalePlayerIds.length} stale player snapshots...`);
+    for (let i = 0; i < stalePlayerIds.length; i += BATCH) {
+      const chunk = stalePlayerIds.slice(i, i + BATCH);
+      const { error } = await sb
+        .from("dpv_snapshots")
+        .delete()
+        .in("player_id", chunk);
+      if (error) {
+        console.error("Cleanup delete error:", error);
+        process.exit(1);
+      }
+    }
+    console.log(`  deleted ${stalePlayerIds.length} stale player ids`);
+  } else {
+    console.log("No stale snapshots to clean up.");
+  }
   console.log("Done.");
 }
 
