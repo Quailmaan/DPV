@@ -9,15 +9,28 @@ import { NextResponse, type NextRequest } from "next/server";
 // It also gates the entire site behind authentication. Pylon is
 // configured as members-only — every route requires a logged-in user
 // EXCEPT the small public allow-list below (login, signup, OAuth
-// callback). Anything else redirects an unauthenticated visitor to
-// /login?next=<original-path> so they bounce back to where they were
-// trying to go after authenticating.
+// callback, plus API endpoints that authenticate themselves via header
+// or URL token rather than session cookie). Anything else redirects an
+// unauthenticated visitor to /login?next=<original-path> so they bounce
+// back to where they were trying to go after authenticating.
+//
+// API exceptions in detail:
+//   /api/cron/*         — Bearer <CRON_SECRET> from Vercel Cron
+//   /api/stripe/webhook — signed by Stripe (verifyWebhookSignature)
+//   /email/unsubscribe  — UUID token in the URL (matches email_preferences)
 //
 // We also forward the request pathname to server components via the
 // `x-pathname` header so the root layout can hide the site chrome on
 // auth pages (the login page is the marketing landing — no nav).
 
-const PUBLIC_PREFIXES = ["/login", "/signup", "/auth"];
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/signup",
+  "/auth",
+  "/api/cron",
+  "/api/stripe/webhook",
+  "/email/unsubscribe",
+];
 
 export async function middleware(request: NextRequest) {
   // Forward pathname so the root layout can decide whether to render
