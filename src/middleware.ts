@@ -4,13 +4,31 @@ import { NextResponse, type NextRequest } from "next/server";
 // Middleware: refreshes the Supabase auth session on every request and
 // keeps cookies in sync between the request and the response. Without
 // this, server components see stale tokens after the access token
-// expires (typically 1 hour). The middleware also enforces auth on
-// protected routes (everything under /account and /league/sync).
+// expires (typically 1 hour).
+//
+// It also gates the entire site behind authentication. Pylon is
+// configured as members-only — every route requires a logged-in user
+// EXCEPT the small public allow-list below (login, signup, OAuth
+// callback). Anything else redirects an unauthenticated visitor to
+// /login?next=<original-path> so they bounce back to where they were
+// trying to go after authenticating.
+//
+// We also forward the request pathname to server components via the
+// `x-pathname` header so the root layout can hide the site chrome on
+// auth pages (the login page is the marketing landing — no nav).
 
-const PROTECTED_PREFIXES = ["/account", "/welcome"];
+const PUBLIC_PREFIXES = ["/login", "/signup", "/auth"];
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  // Forward pathname so the root layout can decide whether to render
+  // the header. Cloning the headers is cheap and keeps the original
+  // request object unmodified.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", request.nextUrl.pathname);
+
+  let response = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,7 +42,9 @@ export async function middleware(request: NextRequest) {
           for (const { name, value } of cookiesToSet) {
             request.cookies.set(name, value);
           }
-          response = NextResponse.next({ request });
+          response = NextResponse.next({
+            request: { headers: requestHeaders },
+          });
           for (const { name, value, options } of cookiesToSet) {
             response.cookies.set(name, value, options);
           }
@@ -40,11 +60,15 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isProtected = PROTECTED_PREFIXES.some((p) => path.startsWith(p));
-  if (isProtected && !user) {
+  const isPublic = PUBLIC_PREFIXES.some(
+    (p) => path === p || path.startsWith(p + "/"),
+  );
+
+  if (!isPublic && !user) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
-    redirectUrl.searchParams.set("next", path);
+    redirectUrl.search = "";
+    redirectUrl.searchParams.set("next", path + request.nextUrl.search);
     return NextResponse.redirect(redirectUrl);
   }
 
