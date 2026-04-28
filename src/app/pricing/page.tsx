@@ -89,13 +89,13 @@ export default async function PricingPage() {
             <Bullet pro>Roster report card (contender vs. rebuild)</Bullet>
             <Bullet pro>Sell-window indicator on every player</Bullet>
             <Bullet pro>Trade finder — fair-value ideas per team</Bullet>
+            <Bullet pro>CSV export (rankings, rosters, free agents)</Bullet>
           </ul>
           <div className="mb-6 rounded-md border border-emerald-200/60 dark:border-emerald-900/60 bg-emerald-100/40 dark:bg-emerald-950/30 p-3">
             <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-400 mb-1.5">
               Coming soon — included in Pro
             </div>
             <ul className="text-xs space-y-1 text-zinc-700 dark:text-zinc-300">
-              <ComingSoon>CSV export</ComingSoon>
               <ComingSoon>Mobile push notifications</ComingSoon>
             </ul>
           </div>

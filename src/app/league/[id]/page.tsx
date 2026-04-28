@@ -466,7 +466,10 @@ export default async function LeagueDetailPage({
         />
       )}
 
-      <h2 className="text-sm font-semibold mb-3">Power Rankings</h2>
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="text-sm font-semibold">Power Rankings</h2>
+        {isPro && <CsvLink href={`/api/league/${id}/export/rankings`} />}
+      </div>
       <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 mb-8">
         <table className="w-full text-sm min-w-[680px]">
           <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
@@ -588,9 +591,16 @@ export default async function LeagueDetailPage({
 
       {focusedTeam && focusedRoster && (
         <div className="mb-8">
-          <h2 className="text-sm font-semibold mb-3">
-            {focusedTeam.ownerName} — Roster
-          </h2>
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-sm font-semibold">
+              {focusedTeam.ownerName} — Roster
+            </h2>
+            {isPro && (
+              <CsvLink
+                href={`/api/league/${id}/export/team/${focusedTeam.rosterId}`}
+              />
+            )}
+          </div>
           <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
             <table className="w-full text-sm min-w-[640px]">
               <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
@@ -695,8 +705,11 @@ export default async function LeagueDetailPage({
         </div>
       )}
 
-      <div className="mb-4 flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold">Free Agents</h2>
+      <div className="mb-4 flex items-baseline justify-between flex-wrap gap-3">
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-sm font-semibold">Free Agents</h2>
+          {isPro && <CsvLink href={`/api/league/${id}/export/free-agents`} />}
+        </div>
         <div className="flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-xs">
           {POSITIONS.map((p) => {
             const params = new URLSearchParams();
@@ -876,6 +889,35 @@ function TradeIdeasTeaser({ leagueId }: { leagueId: string }) {
         Upgrade to Pro
       </Link>
     </div>
+  );
+}
+
+// Compact "Download CSV" link next to a section heading. Pro-only —
+// the page gates rendering, so this just renders the visual without
+// re-checking. A plain anchor (not next/link) so the browser handles
+// the download attribute and Content-Disposition correctly.
+function CsvLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-emerald-700 dark:hover:text-emerald-400"
+    >
+      <svg
+        className="h-3.5 w-3.5"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 3v12" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M5 21h14" />
+      </svg>
+      Download CSV
+    </a>
   );
 }
 
