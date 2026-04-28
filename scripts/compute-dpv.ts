@@ -893,6 +893,33 @@ async function main() {
   }
   console.log(`  wrote ${combined.length} snapshots`);
 
+  // Append today's values to dpv_history. Source of truth for the
+  // trajectory indicator (30-day, 6-month value change %) and the
+  // sell-window score downstream. Upserting on (player_id, scoring_format,
+  // snapshot_date) makes the same-day rerun idempotent — values from the
+  // last run of the day are what end up persisted.
+  const snapshotDate = TODAY.toISOString().slice(0, 10);
+  console.log(`Writing dpv_history for ${snapshotDate}...`);
+  const historyRows = combined.map((c) => ({
+    player_id: c.player_id,
+    scoring_format: c.scoring_format,
+    snapshot_date: snapshotDate,
+    dpv: c.dpv,
+  }));
+  for (let i = 0; i < historyRows.length; i += BATCH) {
+    const chunk = historyRows.slice(i, i + BATCH);
+    const { error } = await sb
+      .from("dpv_history")
+      .upsert(chunk, {
+        onConflict: "player_id,scoring_format,snapshot_date",
+      });
+    if (error) {
+      console.error("History upsert error:", error);
+      process.exit(1);
+    }
+  }
+  console.log(`  wrote ${historyRows.length} history rows`);
+
   // Cleanup pass: delete snapshots for players we didn't compute this run.
   // The script only upserts, so without this any player who retires (or is
   // otherwise dropped from the active set) keeps their last computed DPV

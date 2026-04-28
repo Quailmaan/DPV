@@ -77,6 +77,27 @@ create table if not exists public.dpv_snapshots (
 
 create index if not exists idx_dpv_sorted on public.dpv_snapshots(scoring_format, dpv desc);
 
+-- Daily DPV snapshots over time. Source of truth for the trajectory
+-- indicator (30-day, 6-month value change %) and the sell-window score.
+-- Appended once per compute-dpv run, keyed by snapshot_date so re-running
+-- the same day overwrites instead of double-counting.
+--
+-- Retention: unbounded for now. ~5k players × 3 formats × 365 days =
+-- ~5.5M rows/year, well within Postgres comfort with the index below.
+-- We can prune to weekly granularity past 90 days later if needed.
+create table if not exists public.dpv_history (
+  player_id text not null references public.players(player_id) on delete cascade,
+  scoring_format text not null check (scoring_format in ('STANDARD','HALF_PPR','FULL_PPR')),
+  snapshot_date date not null,
+  dpv int not null,
+  primary key (player_id, scoring_format, snapshot_date)
+);
+
+-- Trajectory queries hit (player_id, scoring_format) and walk back in
+-- time, so the index leads with those and orders by date desc.
+create index if not exists idx_dpv_history_player
+  on public.dpv_history(player_id, scoring_format, snapshot_date desc);
+
 create table if not exists public.hsm_comps (
   player_id text not null references public.players(player_id) on delete cascade,
   comps jsonb not null,
@@ -264,6 +285,7 @@ alter table public.player_seasons enable row level security;
 alter table public.team_seasons enable row level security;
 alter table public.market_values enable row level security;
 alter table public.dpv_snapshots enable row level security;
+alter table public.dpv_history enable row level security;
 alter table public.leagues enable row level security;
 alter table public.league_rosters enable row level security;
 alter table public.league_picks enable row level security;
@@ -289,6 +311,10 @@ create policy "public read market_values" on public.market_values
 
 drop policy if exists "public read dpv_snapshots" on public.dpv_snapshots;
 create policy "public read dpv_snapshots" on public.dpv_snapshots
+  for select to anon, authenticated using (true);
+
+drop policy if exists "public read dpv_history" on public.dpv_history;
+create policy "public read dpv_history" on public.dpv_history
   for select to anon, authenticated using (true);
 
 drop policy if exists "public read leagues" on public.leagues;
