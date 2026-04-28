@@ -91,6 +91,30 @@ export async function syncLeagueAction(
   return {};
 }
 
+// Re-run the Sleeper sync for a league the user already has linked. This is
+// the "refresh" path — picks up roster moves, traded picks, etc. without
+// adding a new row to user_leagues (so the cap is unaffected). Verifies the
+// user owns the league first so a hand-crafted form post can't trigger
+// syncs against arbitrary leagues.
+export async function resyncLeagueAction(formData: FormData): Promise<void> {
+  const session = await requireSession("/login?next=/league");
+  const leagueId = String(formData.get("league_id") ?? "").trim();
+  if (!leagueId) return;
+
+  const sb = await createServerClient();
+  const { data: link } = await sb
+    .from("user_leagues")
+    .select("league_id")
+    .eq("user_id", session.userId)
+    .eq("league_id", leagueId)
+    .maybeSingle();
+  if (!link) return;
+
+  await syncSleeperLeague(leagueId);
+  revalidatePath("/league");
+  revalidatePath(`/league/${leagueId}`);
+}
+
 export async function removeLeagueAction(formData: FormData): Promise<void> {
   const session = await requireSession("/login?next=/league");
   const leagueId = String(formData.get("league_id") ?? "").trim();

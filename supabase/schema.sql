@@ -117,6 +117,30 @@ create table if not exists public.league_rosters (
 
 create index if not exists idx_league_rosters_league on public.league_rosters(league_id);
 
+-- Per-league rookie pick ownership. Each row is one round of one season,
+-- pinned to the team whose draft slot it is (`original_roster_id`) and the
+-- team that currently holds it (`owner_roster_id`). Slot ordering inside a
+-- round (1.01 vs 1.05) isn't determined until standings finalize, so we
+-- only track at round granularity — the trade calculator values these as
+-- the average DPV across the round and notes the limitation in the UI.
+--
+-- Sleeper's /league/{id}/traded_picks endpoint only returns picks that
+-- have changed hands. Untraded picks are synthesized from the roster list
+-- at sync time so every team's default picks (their own R1/R2/R3 across
+-- the rolling 3-year window) appear here too.
+create table if not exists public.league_picks (
+  league_id text not null references public.leagues(league_id) on delete cascade,
+  season int not null,
+  round int not null,
+  original_roster_id int not null,
+  owner_roster_id int not null,
+  updated_at timestamptz not null default now(),
+  primary key (league_id, season, round, original_roster_id)
+);
+
+create index if not exists idx_league_picks_league on public.league_picks(league_id);
+create index if not exists idx_league_picks_owner on public.league_picks(league_id, owner_roster_id);
+
 -- Pre-NFL-draft prospect rankings. Raw per-source entries: one row per
 -- (prospect, source). Stack multiple sites (KTC, DLF, NFLMDD, etc.) for
 -- the same prospect and let the aggregation script build a consensus.
@@ -242,6 +266,7 @@ alter table public.market_values enable row level security;
 alter table public.dpv_snapshots enable row level security;
 alter table public.leagues enable row level security;
 alter table public.league_rosters enable row level security;
+alter table public.league_picks enable row level security;
 alter table public.prospects enable row level security;
 alter table public.prospect_consensus enable row level security;
 alter table public.class_strength enable row level security;
@@ -272,6 +297,10 @@ create policy "public read leagues" on public.leagues
 
 drop policy if exists "public read league_rosters" on public.league_rosters;
 create policy "public read league_rosters" on public.league_rosters
+  for select to anon, authenticated using (true);
+
+drop policy if exists "public read league_picks" on public.league_picks;
+create policy "public read league_picks" on public.league_picks
   for select to anon, authenticated using (true);
 
 drop policy if exists "public read prospects" on public.prospects;

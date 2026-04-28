@@ -28,6 +28,14 @@ export type TradePlayer = {
    */
   marketDelta: number | null;
   tier: string;
+  /**
+   * League-mode only. For picks tracked via Sleeper's traded_picks endpoint,
+   * this is the roster_id that currently owns the pick after any chain of
+   * trades. `null`/missing for player rows and for picks rendered outside a
+   * specific league context (where every team can theoretically trade for
+   * any pick). The trade calculator uses this to filter picks per side.
+   */
+  ownerRosterId?: number | null;
 };
 
 export type LeagueRosterOption = {
@@ -528,29 +536,28 @@ function TradeSide({
 
     if (rosterPlayerIds) {
       // Team scoped: the dropdown should reflect THIS team's tradeable
-      // assets, not every pick in the league.
+      // assets — their players AND the picks Sleeper says they currently
+      // own (after any chain of trades, via the league_picks table
+      // populated at sync time).
       //
-      // Picks aren't tracked per-roster yet, so we deliberately omit them
-      // from the auto-populated roster view (otherwise every team appears
-      // to own every pick in the dropdown — confusing and inaccurate).
-      // Picks DO surface when the user types a query matching them
-      // (e.g. "2026" or "pick"), with a UI caveat that pick ownership
-      // isn't tracked yet — that's still useful for valuing a pick a user
-      // knows they own.
-      const rosterOnly = free.filter((p) => rosterPlayerIds.has(p.id));
+      // For NFL players we filter by player_ids on the league_rosters row.
+      // For picks we filter by ownerRosterId on the synthesized
+      // TradePlayer (see generateTeamRoundPicks). Picks owned by another
+      // team are excluded outright — you can't trade them.
+      const ownsAsset = (p: TradePlayer) =>
+        p.position === "PICK"
+          ? selectedRosterId !== null && p.ownerRosterId === selectedRosterId
+          : rosterPlayerIds.has(p.id);
+      const rosterOnly = free.filter(ownsAsset);
       if (!q) return rosterOnly.slice(0, 25);
-      const rosterMatches = rosterOnly.filter((p) =>
-        p.name.toLowerCase().includes(q),
-      );
-      const pickMatches = free.filter(
-        (p) => p.position === "PICK" && p.name.toLowerCase().includes(q),
-      );
-      return [...rosterMatches, ...pickMatches].slice(0, 12);
+      return rosterOnly
+        .filter((p) => p.name.toLowerCase().includes(q))
+        .slice(0, 12);
     }
 
     if (!q) return [];
     return free.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 12);
-  }, [query, players, taken, rosterPlayerIds]);
+  }, [query, players, taken, rosterPlayerIds, selectedRosterId]);
 
   const badgeColor =
     accent === "red"
@@ -619,64 +626,49 @@ function TradeSide({
         />
         {focused && matches.length > 0 && (
           <div className="absolute z-10 mt-1 w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg overflow-hidden max-h-80 overflow-y-auto">
-            {matches.map((p) => {
-              // Picks aren't roster-tracked yet, so when one shows up in a
-              // team-scoped search we annotate it so users don't read the
-              // dropdown as "this team owns this pick."
-              const isUntrackedPick =
-                p.position === "PICK" && rosterPlayerIds !== null;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => {
-                    setSide([...side, p]);
-                    setQuery("");
-                    setFocused(false);
-                  }}
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-between gap-3"
-                >
-                  <span className="flex items-center gap-2 min-w-0">
-                    <span className="font-medium truncate">{p.name}</span>
-                    <span
-                      className={`text-xs rounded px-1.5 py-0.5 font-mono flex-shrink-0 ${
-                        p.position === "PICK"
-                          ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
-                          : "bg-zinc-100 dark:bg-zinc-800"
-                      }`}
-                    >
-                      {p.position}
+            {matches.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  setSide([...side, p]);
+                  setQuery("");
+                  setFocused(false);
+                }}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-between gap-3"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="font-medium truncate">{p.name}</span>
+                  <span
+                    className={`text-xs rounded px-1.5 py-0.5 font-mono flex-shrink-0 ${
+                      p.position === "PICK"
+                        ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+                        : "bg-zinc-100 dark:bg-zinc-800"
+                    }`}
+                  >
+                    {p.position}
+                  </span>
+                  {p.position !== "PICK" && (
+                    <span className="text-xs text-zinc-500 flex-shrink-0">
+                      {p.team ?? "—"}
                     </span>
-                    {p.position !== "PICK" && (
-                      <span className="text-xs text-zinc-500 flex-shrink-0">
-                        {p.team ?? "—"}
-                      </span>
-                    )}
-                    {isUntrackedPick && (
+                  )}
+                  {(() => {
+                    const b = buySellBadge(p.marketDelta);
+                    return b ? (
                       <span
-                        className="text-[10px] uppercase tracking-wider text-zinc-400 flex-shrink-0"
-                        title="Pick ownership isn't tracked per-team yet — verify your team actually owns this pick before trading."
+                        className={`text-[10px] font-bold tracking-wider px-1 py-0.5 rounded flex-shrink-0 ${BUY_SELL_CLASS[b.tone]}`}
                       >
-                        verify owner
+                        {b.label}
                       </span>
-                    )}
-                    {(() => {
-                      const b = buySellBadge(p.marketDelta);
-                      return b ? (
-                        <span
-                          className={`text-[10px] font-bold tracking-wider px-1 py-0.5 rounded flex-shrink-0 ${BUY_SELL_CLASS[b.tone]}`}
-                        >
-                          {b.label}
-                        </span>
-                      ) : null;
-                    })()}
-                  </span>
-                  <span className="tabular-nums font-semibold flex-shrink-0">
-                    {p.dpv}
-                  </span>
-                </button>
-              );
-            })}
+                    ) : null;
+                  })()}
+                </span>
+                <span className="tabular-nums font-semibold flex-shrink-0">
+                  {p.dpv}
+                </span>
+              </button>
+            ))}
           </div>
         )}
       </div>

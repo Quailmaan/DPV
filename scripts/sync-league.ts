@@ -18,6 +18,7 @@ async function main() {
   console.log(
     `  players mapped: ${result.playersMapped}, unmapped: ${result.playersUnmapped}`,
   );
+  console.log(`  picks synced: ${result.picksSynced}`);
 }
 
 main().catch((e) => {

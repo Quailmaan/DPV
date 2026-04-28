@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createServerClient } from "@/lib/supabase/server";
 import RemoveLeagueButton from "./RemoveLeagueButton";
+import ResyncLeagueButton from "./ResyncLeagueButton";
 import SyncLeagueForm from "./SyncLeagueForm";
 
 const MAX_LEAGUES_PER_USER = 3;
@@ -122,7 +123,10 @@ export default async function LeaguesPage() {
                     {new Date(l.synced_at).toLocaleDateString()}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <RemoveLeagueButton leagueId={l.league_id} />
+                    <div className="flex items-center justify-end gap-3">
+                      <ResyncLeagueButton leagueId={l.league_id} />
+                      <RemoveLeagueButton leagueId={l.league_id} />
+                    </div>
                   </td>
                 </tr>
               ))}

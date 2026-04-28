@@ -1,7 +1,11 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { CURRENT_SEASON } from "@/lib/dpv/constants";
 import type { ScoringFormat } from "@/lib/dpv/types";
-import { generatePickPlayers } from "@/lib/picks/values";
+import {
+  generatePickPlayers,
+  generateTeamRoundPicks,
+  type LeaguePickRow,
+} from "@/lib/picks/values";
 import {
   generateRookieTradeEntries,
   roundFromOverallPick,
@@ -57,9 +61,13 @@ export default async function TradePage({
   // 2RB+FLEX leagues weight RBs harder. Captured from Sleeper at sync time.
   let leagueRosterPositions: string[] | null = null;
   let leagueTotalRosters: number | null = null;
+  // Per-roster pick ownership, sourced from Sleeper's traded_picks endpoint
+  // at sync time. Only loaded when a league is selected; outside league
+  // context we render the full slot-level pick set instead.
+  let leaguePicks: LeaguePickRow[] = [];
 
   if (requestedLeague) {
-    const [leagueRes, rostersRes] = await Promise.all([
+    const [leagueRes, rostersRes, picksRes] = await Promise.all([
       sb.from("leagues").select("*").eq("league_id", requestedLeague).maybeSingle(),
       sb
         .from("league_rosters")
@@ -68,6 +76,10 @@ export default async function TradePage({
         )
         .eq("league_id", requestedLeague)
         .order("roster_id", { ascending: true }),
+      sb
+        .from("league_picks")
+        .select("season, round, original_roster_id, owner_roster_id")
+        .eq("league_id", requestedLeague),
     ]);
     if (leagueRes.data) {
       leagueName = leagueRes.data.name;
@@ -94,6 +106,17 @@ export default async function TradePage({
       ownerName: r.owner_display_name ?? `Team ${r.roster_id}`,
       teamName: r.team_name,
       playerIds: r.player_ids,
+    }));
+    leaguePicks = ((picksRes.data ?? []) as Array<{
+      season: number;
+      round: number;
+      original_roster_id: number;
+      owner_roster_id: number;
+    }>).map((p) => ({
+      season: p.season,
+      round: p.round,
+      original_roster_id: p.original_roster_id,
+      owner_roster_id: p.owner_roster_id,
     }));
   }
 
@@ -322,13 +345,38 @@ export default async function TradePage({
   }
   const synthRookies = generateRookieTradeEntries(rookieInputs);
 
+  // Picks: in league mode, use the synced league_picks table so each pick
+  // is anchored to the team that actually owns it (after any chain of
+  // trades from Sleeper). Outside league mode we fall back to the full
+  // slot-level set, since there's no specific roster to filter against.
+  //
+  // Round-level vs slot-level: Sleeper's traded_picks endpoint exposes
+  // round only (slot inside the round is a function of standings and
+  // isn't determined until the regular season ends). The valuation
+  // collapses to round-average DPV; the UI reflects that with "R1" /
+  // "R2" / "R3" labels rather than "1.05".
+  const pickEntries: TradePlayer[] =
+    requestedLeague && leaguePicks.length > 0
+      ? generateTeamRoundPicks(
+          requestedLeague,
+          leaguePicks,
+          rosterOptions.map((r) => ({
+            rosterId: r.rosterId,
+            ownerName: r.ownerName,
+            teamName: r.teamName,
+          })),
+          new Date(),
+          classOverrides,
+        )
+      : generatePickPlayers(new Date(), classOverrides);
+
   // Merge picks + synthetic rookies into the tradeable pool. NFL players,
   // synthetic rookies, and rookie picks are ranked together by DPV so the
   // search dropdown blends them naturally.
   const players: TradePlayer[] = [
     ...nflPlayers,
     ...synthRookies,
-    ...generatePickPlayers(new Date(), classOverrides),
+    ...pickEntries,
   ].sort((a, b) => b.dpv - a.dpv);
 
   // League-aware position scarcity. Replacement cliff is computed from the

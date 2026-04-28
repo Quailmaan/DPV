@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { currentPickWindow } from "@/lib/picks/constants";
 
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -38,6 +39,18 @@ type SleeperRoster = {
   players: string[] | null;
 };
 
+// Sleeper's traded_picks endpoint returns one row per pick that has changed
+// hands. Untraded picks don't appear and are synthesized from the rosters
+// list. `roster_id` is the team whose draft slot this is (i.e. the original
+// owner); `owner_id` is the current holder after any chain of trades.
+type SleeperTradedPick = {
+  season: string;
+  round: number;
+  roster_id: number;
+  previous_owner_id: number | null;
+  owner_id: number;
+};
+
 type SleeperPlayer = {
   player_id: string;
   gsis_id?: string | null;
@@ -75,6 +88,7 @@ export type SyncResult = {
   rostersSynced: number;
   playersMapped: number;
   playersUnmapped: number;
+  picksSynced: number;
 };
 
 export async function syncSleeperLeague(
@@ -85,10 +99,11 @@ export async function syncSleeperLeague(
     throw new Error("League ID must be a numeric Sleeper ID.");
   }
 
-  const [leagueRes, usersRes, rostersRes] = await Promise.all([
+  const [leagueRes, usersRes, rostersRes, tradedPicksRes] = await Promise.all([
     fetch(`https://api.sleeper.app/v1/league/${id}`),
     fetch(`https://api.sleeper.app/v1/league/${id}/users`),
     fetch(`https://api.sleeper.app/v1/league/${id}/rosters`),
+    fetch(`https://api.sleeper.app/v1/league/${id}/traded_picks`),
   ]);
 
   if (!leagueRes.ok) {
@@ -103,6 +118,11 @@ export async function syncSleeperLeague(
   }
   const users = (await usersRes.json()) as SleeperUser[];
   const rosters = (await rostersRes.json()) as SleeperRoster[];
+  // traded_picks may 404 or fail intermittently; treat as empty rather than
+  // failing the whole sync. Untraded picks are synthesized regardless.
+  const tradedPicks: SleeperTradedPick[] = tradedPicksRes.ok
+    ? ((await tradedPicksRes.json()) as SleeperTradedPick[]) ?? []
+    : [];
 
   // Build sleeper_id → gsis_id map by fetching the full Sleeper player set.
   const playersRes = await fetch("https://api.sleeper.app/v1/players/nfl");
@@ -237,6 +257,81 @@ export async function syncSleeperLeague(
     if (error) throw new Error(`Roster insert: ${error.message}`);
   }
 
+  // ----------------------------------------------------------------
+  // Rookie pick ownership.
+  //
+  // Sleeper's /traded_picks endpoint returns ONLY picks that have changed
+  // hands. To get a full per-team picture we synthesize the default state
+  // (each team owns their own R1/R2/R3 across the rolling 3-year window),
+  // then apply the traded rows on top. owner_roster_id starts equal to
+  // original_roster_id, then gets overridden where Sleeper says it should.
+  //
+  // Slot ordering inside a round (1.01 vs 1.05) isn't tracked here — Sleeper
+  // doesn't expose it, and it's not knowable until standings finalize. The
+  // trade calculator values these picks as the round-average DPV.
+  // ----------------------------------------------------------------
+  const [y0, y1, y2] = currentPickWindow(new Date());
+  const seasonsInWindow = [y0, y1, y2];
+  const rounds: Array<1 | 2 | 3> = [1, 2, 3];
+
+  type PickRow = {
+    league_id: string;
+    season: number;
+    round: number;
+    original_roster_id: number;
+    owner_roster_id: number;
+    updated_at: string;
+  };
+
+  // Default: each roster owns its own picks across the window.
+  const pickKey = (s: number, r: number, orig: number) => `${s}|${r}|${orig}`;
+  const pickMap = new Map<string, PickRow>();
+  const nowIso = new Date().toISOString();
+  for (const r of rosters) {
+    for (const season of seasonsInWindow) {
+      for (const round of rounds) {
+        pickMap.set(pickKey(season, round, r.roster_id), {
+          league_id: league.league_id,
+          season,
+          round,
+          original_roster_id: r.roster_id,
+          owner_roster_id: r.roster_id,
+          updated_at: nowIso,
+        });
+      }
+    }
+  }
+
+  // Apply Sleeper's traded picks. We only care about rounds 1-3 within the
+  // current window; deeper rounds and out-of-window seasons are ignored
+  // (the pick valuation curve only covers R1-R3, and the window roll-forward
+  // makes earlier seasons no longer tradeable as rookie picks).
+  for (const tp of tradedPicks) {
+    const season = Number(tp.season);
+    if (!seasonsInWindow.includes(season)) continue;
+    if (tp.round < 1 || tp.round > 3) continue;
+    const key = pickKey(season, tp.round, tp.roster_id);
+    const existing = pickMap.get(key);
+    if (!existing) continue;
+    existing.owner_roster_id = tp.owner_id;
+  }
+
+  // Wipe + reinsert league_picks for this league. Round-level granularity
+  // means at most rosters * 3 seasons * 3 rounds rows per league (~108 for
+  // a 12-team league) — well under bulk-insert limits.
+  {
+    const { error } = await sb
+      .from("league_picks")
+      .delete()
+      .eq("league_id", league.league_id);
+    if (error) throw new Error(`Picks clear: ${error.message}`);
+  }
+  const pickRows = Array.from(pickMap.values());
+  if (pickRows.length > 0) {
+    const { error } = await sb.from("league_picks").insert(pickRows);
+    if (error) throw new Error(`Picks insert: ${error.message}`);
+  }
+
   return {
     leagueId: league.league_id,
     name: league.name,
@@ -246,5 +341,6 @@ export async function syncSleeperLeague(
     rostersSynced: rows.length,
     playersMapped: totalMapped,
     playersUnmapped: totalUnmapped,
+    picksSynced: pickRows.length,
   };
 }
