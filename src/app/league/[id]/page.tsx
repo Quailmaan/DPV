@@ -15,8 +15,15 @@ import { buildMarketDeltaMap } from "@/lib/dpv/marketDelta";
 import {
   computeSellWindow,
   type Position as SellWindowPosition,
+  type SellWindow,
 } from "@/lib/dpv/sellWindow";
 import SellWindowBadge from "@/components/SellWindowBadge";
+import {
+  findTrades,
+  type TradeFinderTeam,
+  type TradeFinderPlayer,
+  type TradePosition,
+} from "@/lib/league/tradeFinder";
 
 type SearchParams = Promise<{
   team?: string;
@@ -170,6 +177,41 @@ export default async function LeagueDetailPage({
     } => x !== null);
   const marketDeltaMap = buildMarketDeltaMap(marketDeltaInput);
 
+  // Sell-window per rostered player. Computed once, reused by the
+  // focused-team table column AND the trade finder. Rostered-only —
+  // there's no point computing for free agents here (the FA list
+  // doesn't show a window column today).
+  const sellWindowByPlayer = new Map<string, SellWindow | null>();
+  for (const r of rosters) {
+    for (const pid of r.player_ids) {
+      if (sellWindowByPlayer.has(pid)) continue;
+      const s = snapMap.get(pid);
+      if (!s || !s.players) {
+        sellWindowByPlayer.set(pid, null);
+        continue;
+      }
+      const pos = s.players.position;
+      if (pos !== "QB" && pos !== "RB" && pos !== "WR" && pos !== "TE") {
+        sellWindowByPlayer.set(pid, null);
+        continue;
+      }
+      const bd = s.players.birthdate;
+      const ageYears = bd
+        ? (Date.now() - new Date(bd).getTime()) /
+          (365.25 * 24 * 3600 * 1000)
+        : null;
+      sellWindowByPlayer.set(
+        pid,
+        computeSellWindow({
+          position: pos as SellWindowPosition,
+          age: ageYears,
+          dpv: Number(s.dpv),
+          marketDelta: marketDeltaMap.get(pid) ?? null,
+        }),
+      );
+    }
+  }
+
   // Summarize each roster: total DPV and strengths/weaknesses by position.
   type RosterSummary = {
     rosterId: number;
@@ -244,6 +286,57 @@ export default async function LeagueDetailPage({
     ? rosters.find((r) => r.roster_id === focusedTeam.rosterId) ?? null
     : null;
 
+  // Trade finder — build TradeFinderTeam shape per roster from data
+  // we already have, then ask the pure helper for top ideas. Computed
+  // only when a team is focused (it's the entry point to the section).
+  function buildTradeFinderTeam(
+    rosterId: number,
+    ownerName: string,
+    teamName: string | null,
+    playerIds: string[],
+    byPos: Record<TradePosition, number>,
+  ): TradeFinderTeam {
+    const players: TradeFinderPlayer[] = [];
+    for (const pid of playerIds) {
+      const s = snapMap.get(pid);
+      if (!s || !s.players) continue;
+      const pos = s.players.position;
+      if (pos !== "QB" && pos !== "RB" && pos !== "WR" && pos !== "TE") continue;
+      players.push({
+        playerId: pid,
+        name: s.players.name,
+        position: pos as TradePosition,
+        dpv: Number(s.dpv),
+        sellWindow: sellWindowByPlayer.get(pid) ?? null,
+      });
+    }
+    return { rosterId, ownerName, teamName, players, byPos };
+  }
+  const tradeIdeas = focusedTeam && focusedRoster
+    ? findTrades(
+        buildTradeFinderTeam(
+          focusedTeam.rosterId,
+          focusedTeam.ownerName,
+          focusedTeam.teamName,
+          focusedRoster.player_ids,
+          focusedTeam.byPos,
+        ),
+        rosters
+          .filter((r) => r.roster_id !== focusedTeam.rosterId)
+          .map((r) => {
+            const summary = summaries.find((s) => s.rosterId === r.roster_id);
+            return buildTradeFinderTeam(
+              r.roster_id,
+              r.owner_display_name ?? `Team ${r.roster_id}`,
+              r.team_name,
+              r.player_ids,
+              summary?.byPos ?? { QB: 0, RB: 0, WR: 0, TE: 0 },
+            );
+          }),
+        leaguePosAvg,
+      )
+    : [];
+
   // Compute report cards once for every roster — cheap pure-fn pass
   // over data we already have. Used to render verdict badges in the
   // rankings table. The full breakdown (composite + sub-scores) lives
@@ -289,14 +382,6 @@ export default async function LeagueDetailPage({
       (Date.now() - new Date(bd).getTime()) /
       (365.25 * 24 * 3600 * 1000);
     return y.toFixed(1);
-  }
-
-  function ageNum(bd: string | null): number | null {
-    if (!bd) return null;
-    return (
-      (Date.now() - new Date(bd).getTime()) /
-      (365.25 * 24 * 3600 * 1000)
-    );
   }
 
   const filteredFAs = freeAgents.filter((fa) => {
@@ -502,17 +587,7 @@ export default async function LeagueDetailPage({
                   .sort((a, b) => b.dpv - a.dpv)
                   .map((s) => {
                     const pos = s.players!.position;
-                    const isFantasyPos =
-                      pos === "QB" || pos === "RB" || pos === "WR" || pos === "TE";
-                    const sw = isFantasyPos
-                      ? computeSellWindow({
-                          position: pos as SellWindowPosition,
-                          age: ageNum(s.players!.birthdate),
-                          dpv: Number(s.dpv),
-                          marketDelta:
-                            marketDeltaMap.get(s.player_id) ?? null,
-                        })
-                      : null;
+                    const sw = sellWindowByPlayer.get(s.player_id) ?? null;
                     return (
                       <tr
                         key={s.player_id}
@@ -563,6 +638,35 @@ export default async function LeagueDetailPage({
               Open trade calc with this roster loaded
             </Link>
             .
+          </div>
+
+          <div className="mt-8">
+            <div className="flex items-baseline justify-between mb-3">
+              <h2 className="text-sm font-semibold">Trade Ideas</h2>
+              <span className="text-xs text-zinc-500">
+                Sells × needs across your league
+              </span>
+            </div>
+            {!isPro ? (
+              <TradeIdeasTeaser leagueId={id} />
+            ) : tradeIdeas.length === 0 ? (
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 text-sm text-zinc-500">
+                No clear trade ideas right now — your sell-window flags
+                don&apos;t line up with another team&apos;s positional
+                surplus. Re-check after the next sync.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {tradeIdeas.map((idea) => (
+                  <TradeIdeaCard
+                    key={`${idea.give.playerId}-${idea.receive.playerId}`}
+                    leagueId={id}
+                    fromRosterId={focusedTeam.rosterId}
+                    idea={idea}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -639,6 +743,108 @@ export default async function LeagueDetailPage({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// One trade idea — `give → receive` with rationale and a quick link to
+// the trade calculator pre-loaded with both sides. Score and DPV delta
+// are surfaced so the user can size the deal at a glance.
+function TradeIdeaCard({
+  leagueId,
+  fromRosterId,
+  idea,
+}: {
+  leagueId: string;
+  fromRosterId: number;
+  idea: {
+    give: { playerId: string; name: string; position: string; dpv: number };
+    receive: {
+      playerId: string;
+      name: string;
+      position: string;
+      dpv: number;
+    };
+    partnerRosterId: number;
+    partnerName: string;
+    partnerTeamName: string | null;
+    myDpvDelta: number;
+    rationale: string;
+  };
+}) {
+  const deltaLabel =
+    idea.myDpvDelta > 0
+      ? `+${Math.round(idea.myDpvDelta)}`
+      : Math.round(idea.myDpvDelta).toString();
+  const deltaCls =
+    idea.myDpvDelta > 0
+      ? "text-emerald-700 dark:text-emerald-400"
+      : idea.myDpvDelta < 0
+      ? "text-amber-700 dark:text-amber-400"
+      : "text-zinc-500";
+  // Trade calc accepts league + from today. Once it accepts a target
+  // partner + pre-loaded sides we can prefill the whole trade here.
+  const tradeHref = `/trade?league=${leagueId}&from=${fromRosterId}`;
+  return (
+    <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+      <div className="flex items-baseline justify-between mb-1">
+        <div className="text-xs uppercase tracking-wider text-zinc-500">
+          With {idea.partnerName}
+          {idea.partnerTeamName ? ` (${idea.partnerTeamName})` : ""}
+        </div>
+        <div className={`text-xs font-medium tabular-nums ${deltaCls}`}>
+          PYV {deltaLabel}
+        </div>
+      </div>
+      <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center mb-2">
+        <div>
+          <div className="text-[11px] uppercase text-zinc-500">Give</div>
+          <div className="font-medium leading-tight">{idea.give.name}</div>
+          <div className="text-xs text-zinc-500 tabular-nums">
+            {idea.give.position} · {idea.give.dpv}
+          </div>
+        </div>
+        <div className="text-zinc-400">→</div>
+        <div>
+          <div className="text-[11px] uppercase text-zinc-500">Receive</div>
+          <div className="font-medium leading-tight">{idea.receive.name}</div>
+          <div className="text-xs text-zinc-500 tabular-nums">
+            {idea.receive.position} · {idea.receive.dpv}
+          </div>
+        </div>
+      </div>
+      <div className="text-xs text-zinc-600 dark:text-zinc-400 mb-3">
+        {idea.rationale}
+      </div>
+      <Link
+        href={tradeHref}
+        className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
+      >
+        Open in trade calc →
+      </Link>
+    </div>
+  );
+}
+
+// Free-tier teaser. Shows the section is live without giving away the
+// actual ideas — the upgrade pitch is the only thing visible.
+function TradeIdeasTeaser({ leagueId }: { leagueId: string }) {
+  return (
+    <div className="rounded-md border border-emerald-200/60 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 p-4 text-sm">
+      <div className="font-medium text-emerald-900 dark:text-emerald-200 mb-1">
+        Pro: see 5 fair-value trade ideas tailored to this roster.
+      </div>
+      <div className="text-xs text-emerald-800/80 dark:text-emerald-300/80 mb-3">
+        We pair your sell-window flags with each opponent&apos;s
+        positional surplus and hand you the trades that make sense for
+        both sides.
+      </div>
+      <Link
+        href={`/pricing?return=/league/${leagueId}`}
+        className="inline-block text-xs font-medium px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white"
+      >
+        Upgrade to Pro
+      </Link>
     </div>
   );
 }
