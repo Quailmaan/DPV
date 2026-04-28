@@ -8,6 +8,12 @@ import {
   type LandingSpotInput,
 } from "@/lib/dpv/landingSpot";
 import LandingSpotCard from "@/components/LandingSpotCard";
+import {
+  computeSellWindow,
+  type Position as SellWindowPosition,
+} from "@/lib/dpv/sellWindow";
+import SellWindowBadge from "@/components/SellWindowBadge";
+import { getCurrentTier } from "@/lib/billing/tier";
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: "STANDARD", label: "Standard" },
@@ -324,6 +330,26 @@ export default async function PlayerPage({
       ? mktPosRank - dpvPosRank
       : null;
 
+  // Pro-gated sell-window verdict. Only computed for the four fantasy
+  // positions our aging tables cover; everything else (DST/K) silently
+  // skips the badge.
+  const tierState = await getCurrentTier();
+  const isPro = tierState.tier === "pro";
+  const isFantasyPosition =
+    player.position === "QB" ||
+    player.position === "RB" ||
+    player.position === "WR" ||
+    player.position === "TE";
+  const sellWindow =
+    isFantasyPosition && snapshot?.dpv !== undefined && snapshot?.dpv !== null
+      ? computeSellWindow({
+          position: player.position as SellWindowPosition,
+          age,
+          dpv: Number(snapshot.dpv),
+          marketDelta,
+        })
+      : null;
+
   // ── Landing-spot bullets ──────────────────────────────────────────
   // Treat anyone without a 7+-game qualifying season as a "rookie profile"
   // so the analyzer surfaces age + landing-spot bullets that wouldn't
@@ -402,12 +428,15 @@ export default async function PlayerPage({
           <h1 className="text-3xl font-semibold tracking-tight">
             {player.name}
           </h1>
-          <div className="text-sm text-zinc-500 mt-1 flex gap-3">
+          <div className="text-sm text-zinc-500 mt-1 flex items-center gap-3 flex-wrap">
             <span>{player.position}</span>
             <span>·</span>
             <span>{player.current_team ?? "—"}</span>
             <span>·</span>
             <span>Age {age !== null ? age.toFixed(1) : "—"}</span>
+            {sellWindow ? (
+              <SellWindowBadge sw={sellWindow} isPro={isPro} />
+            ) : null}
           </div>
         </div>
         <div className="flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-sm">

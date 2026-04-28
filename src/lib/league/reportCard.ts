@@ -15,8 +15,9 @@ import {
   perTeamStarterDemand,
   type ReplacementByPosition,
 } from "@/lib/dpv/scarcity";
+import { AGE_CLIFFS, type Position } from "@/lib/dpv/constants-aging";
 
-export type Position = "QB" | "RB" | "WR" | "TE";
+export type { Position };
 
 export type ReportPlayer = {
   playerId: string;
@@ -72,18 +73,10 @@ const WEIGHTS = {
 // drowning the score in waiver-wire churn.
 const BENCH_WEIGHT = 0.25;
 
-// ---- Position-specific aging curves ----------------------------------------
-//
-// YearsRemaining(age, position) returns a 0..2 scalar — how much of the
-// player's value projects to hold across the next two seasons. Cliff
-// values come from positional career-arc literature (RBs cliff hardest,
-// QBs play forever).
-const AGE_CLIFFS: Record<Position, { full: number; cliff: number; gone: number }> = {
-  QB: { full: 35, cliff: 38, gone: 40 },
-  RB: { full: 27, cliff: 29, gone: 31 },
-  WR: { full: 30, cliff: 32, gone: 34 },
-  TE: { full: 31, cliff: 33, gone: 35 },
-};
+// Position-specific aging curves come from `lib/dpv/constants-aging.ts`
+// — shared with the sell-window indicator so both features stay in
+// lockstep. yearsRemaining(age, pos) returns a 0..2 scalar: how much
+// value projects to hold across the next two seasons.
 
 function yearsRemaining(age: number | null, pos: Position): number {
   if (age === null || !Number.isFinite(age)) return 1.5; // neutral

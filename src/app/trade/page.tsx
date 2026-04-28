@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getCurrentTier } from "@/lib/billing/tier";
+import { buildMarketDeltaMap } from "@/lib/dpv/marketDelta";
 import { createServerClient } from "@/lib/supabase/server";
 import { CURRENT_SEASON } from "@/lib/dpv/constants";
 import type { ScoringFormat } from "@/lib/dpv/types";
@@ -194,27 +195,9 @@ export default async function TradePage({
       };
     });
 
-  // Per-position rank deltas — only meaningful within the intersection of
-  // players that have BOTH a DPV and a market value. A 5-rank gap at WR
-  // means more than at TE because positions have different depths.
-  const deltaById = new Map<string, number>();
-  const positions = Array.from(new Set(pre.map((p) => p.position)));
-  for (const pos of positions) {
-    const inPos = pre.filter((p) => p.position === pos && p.market !== null);
-    const dpvSorted = [...inPos].sort((a, b) => b.dpv - a.dpv);
-    const mktSorted = [...inPos].sort(
-      (a, b) => (b.market ?? 0) - (a.market ?? 0),
-    );
-    const dpvRank = new Map(dpvSorted.map((p, i) => [p.id, i + 1]));
-    const mktRank = new Map(mktSorted.map((p, i) => [p.id, i + 1]));
-    for (const p of inPos) {
-      const dr = dpvRank.get(p.id);
-      const mr = mktRank.get(p.id);
-      if (dr === undefined || mr === undefined) continue;
-      // Positive delta = DPV ranks higher (lower number) than market = Buy.
-      deltaById.set(p.id, mr - dr);
-    }
-  }
+  // Per-position rank deltas. Shared helper — same math powers the
+  // sell-window indicator on player pages and the league roster view.
+  const deltaById = buildMarketDeltaMap(pre);
 
   const nflPlayers: TradePlayer[] = pre.map((p) => {
     const age = p.birthdate

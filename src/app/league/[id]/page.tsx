@@ -11,6 +11,12 @@ import {
 } from "@/lib/league/reportCard";
 import { createServerClient } from "@/lib/supabase/server";
 import type { ScoringFormat } from "@/lib/dpv/types";
+import { buildMarketDeltaMap } from "@/lib/dpv/marketDelta";
+import {
+  computeSellWindow,
+  type Position as SellWindowPosition,
+} from "@/lib/dpv/sellWindow";
+import SellWindowBadge from "@/components/SellWindowBadge";
 
 type SearchParams = Promise<{
   team?: string;
@@ -97,13 +103,24 @@ export default async function LeagueDetailPage({
 
   // Load DPV + player info for every rostered player AND all free-agent
   // candidates (positions we rank). We fetch all ranked players then split.
-  const { data: snapshots } = await sb
-    .from("dpv_snapshots")
-    .select(
-      "player_id, dpv, tier, players(name, position, current_team, birthdate)",
-    )
-    .eq("scoring_format", league.scoring_format)
-    .order("dpv", { ascending: false });
+  // FantasyCalc market values run alongside — they feed the sell-window
+  // tags on the focused-team roster.
+  const [snapshotsRes, marketRes] = await Promise.all([
+    sb
+      .from("dpv_snapshots")
+      .select(
+        "player_id, dpv, tier, players(name, position, current_team, birthdate)",
+      )
+      .eq("scoring_format", league.scoring_format)
+      .order("dpv", { ascending: false }),
+    sb
+      .from("market_values")
+      .select("player_id, market_value_normalized")
+      .eq("scoring_format", league.scoring_format)
+      .eq("source", "fantasycalc"),
+  ]);
+  const snapshots = snapshotsRes.data;
+  const marketRows = marketRes.data ?? [];
 
   type Snap = {
     player_id: string;
@@ -121,6 +138,37 @@ export default async function LeagueDetailPage({
   for (const s of (snapshots ?? []) as unknown as Snap[]) {
     snapMap.set(s.player_id, s);
   }
+
+  // Per-position rank delta (DPV vs FantasyCalc market). Feeds the
+  // sell-window tag on the focused-team roster — same helper powers the
+  // trade calc and player pages so the math stays in lockstep.
+  const marketByPid = new Map<string, number>();
+  for (const m of marketRows as Array<{
+    player_id: string;
+    market_value_normalized: number | null;
+  }>) {
+    if (m.market_value_normalized !== null) {
+      marketByPid.set(m.player_id, Number(m.market_value_normalized));
+    }
+  }
+  const marketDeltaInput = (snapshots ?? [])
+    .map((s) => {
+      const player = (s as unknown as Snap).players;
+      if (!player) return null;
+      return {
+        id: s.player_id,
+        position: player.position,
+        dpv: Number(s.dpv),
+        market: marketByPid.get(s.player_id) ?? null,
+      };
+    })
+    .filter((x): x is {
+      id: string;
+      position: string;
+      dpv: number;
+      market: number | null;
+    } => x !== null);
+  const marketDeltaMap = buildMarketDeltaMap(marketDeltaInput);
 
   // Summarize each roster: total DPV and strengths/weaknesses by position.
   type RosterSummary = {
@@ -241,6 +289,14 @@ export default async function LeagueDetailPage({
       (Date.now() - new Date(bd).getTime()) /
       (365.25 * 24 * 3600 * 1000);
     return y.toFixed(1);
+  }
+
+  function ageNum(bd: string | null): number | null {
+    if (!bd) return null;
+    return (
+      (Date.now() - new Date(bd).getTime()) /
+      (365.25 * 24 * 3600 * 1000)
+    );
   }
 
   const filteredFAs = freeAgents.filter((fa) => {
@@ -427,7 +483,7 @@ export default async function LeagueDetailPage({
             {focusedTeam.ownerName} — Roster
           </h2>
           <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-            <table className="w-full text-sm min-w-[560px]">
+            <table className="w-full text-sm min-w-[640px]">
               <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
                 <tr>
                   <th className="px-3 py-2 text-left">Player</th>
@@ -436,6 +492,7 @@ export default async function LeagueDetailPage({
                   <th className="px-3 py-2 text-right">Age</th>
                   <th className="px-3 py-2 text-right">PYV</th>
                   <th className="px-3 py-2 text-left">Tier</th>
+                  <th className="px-3 py-2 text-left">Window</th>
                 </tr>
               </thead>
               <tbody>
@@ -443,36 +500,57 @@ export default async function LeagueDetailPage({
                   .map((pid) => snapMap.get(pid))
                   .filter((s): s is Snap => !!s && !!s.players)
                   .sort((a, b) => b.dpv - a.dpv)
-                  .map((s) => (
-                    <tr
-                      key={s.player_id}
-                      className="border-t border-zinc-100 dark:border-zinc-800"
-                    >
-                      <td className="px-3 py-2 font-medium">
-                        <Link
-                          href={`/player/${s.player_id}?fmt=${league.scoring_format}`}
-                          className="hover:underline"
-                        >
-                          {s.players!.name}
-                        </Link>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="inline-block rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
-                          {s.players!.position}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-zinc-500">
-                        {s.players!.current_team ?? "—"}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {ageFrom(s.players!.birthdate)}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold">
-                        {s.dpv}
-                      </td>
-                      <td className="px-3 py-2 text-zinc-500">{s.tier}</td>
-                    </tr>
-                  ))}
+                  .map((s) => {
+                    const pos = s.players!.position;
+                    const isFantasyPos =
+                      pos === "QB" || pos === "RB" || pos === "WR" || pos === "TE";
+                    const sw = isFantasyPos
+                      ? computeSellWindow({
+                          position: pos as SellWindowPosition,
+                          age: ageNum(s.players!.birthdate),
+                          dpv: Number(s.dpv),
+                          marketDelta:
+                            marketDeltaMap.get(s.player_id) ?? null,
+                        })
+                      : null;
+                    return (
+                      <tr
+                        key={s.player_id}
+                        className="border-t border-zinc-100 dark:border-zinc-800"
+                      >
+                        <td className="px-3 py-2 font-medium">
+                          <Link
+                            href={`/player/${s.player_id}?fmt=${league.scoring_format}`}
+                            className="hover:underline"
+                          >
+                            {s.players!.name}
+                          </Link>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="inline-block rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
+                            {pos}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-zinc-500">
+                          {s.players!.current_team ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {ageFrom(s.players!.birthdate)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                          {s.dpv}
+                        </td>
+                        <td className="px-3 py-2 text-zinc-500">{s.tier}</td>
+                        <td className="px-3 py-2">
+                          {sw ? (
+                            <SellWindowBadge sw={sw} isPro={isPro} size="xs" />
+                          ) : (
+                            <span className="text-zinc-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
