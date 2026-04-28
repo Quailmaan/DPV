@@ -116,8 +116,8 @@ export default async function PricingPage() {
             </Link>
           ) : (
             <div className="space-y-2">
-              <CheckoutButton period="yearly" label="Get Pro Yearly — $59" featured />
-              <CheckoutButton period="monthly" label="Get Pro Monthly — $7" />
+              <CheckoutButton period="yearly" label="Upgrade — Yearly $59" featured />
+              <CheckoutButton period="monthly" label="Upgrade — Monthly $7" />
             </div>
           )}
         </div>

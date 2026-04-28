@@ -2,6 +2,8 @@ import { requireSession } from "@/lib/auth/session";
 import { getCurrentTier } from "@/lib/billing/tier";
 import { createServerClient } from "@/lib/supabase/server";
 import { SUPPORT_EMAIL, mailtoHref } from "@/lib/site/contact";
+import AdminGrantProPanel from "./AdminGrantProPanel";
+import ChangeEmailForm from "./ChangeEmailForm";
 import ChangePasswordForm from "./ChangePasswordForm";
 import ChangeUsernameForm from "./ChangeUsernameForm";
 import EmailPrefsForm from "./EmailPrefsForm";
@@ -54,6 +56,11 @@ export default async function AccountPage({
       </section>
 
       <section className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 mb-6">
+        <h2 className="text-sm font-semibold mb-3">Email</h2>
+        <ChangeEmailForm currentEmail={session.email} />
+      </section>
+
+      <section className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 mb-6">
         <h2 className="text-sm font-semibold mb-3">Password</h2>
         <ChangePasswordForm />
       </section>
@@ -65,6 +72,8 @@ export default async function AccountPage({
           lastDigestSentAt={emailPrefs.lastDigestSentAt}
         />
       </section>
+
+      {session.isAdmin && <AdminGrantProPanel />}
 
       <div className="text-xs text-zinc-500">
         Need help with billing or your account?{" "}

@@ -231,6 +231,69 @@ export async function setUsernameAction(
   redirect("/account");
 }
 
+// ---------------- change email ----------------
+
+// Email change goes through a verification step on Supabase's side.
+// `auth.updateUser({ email })` doesn't immediately swap the address —
+// Supabase sends a "Confirm your new email" link to the new address (and
+// to the old one, if "Secure email change" is enabled in the project),
+// and only flips the email after the user clicks. We surface that
+// expectation in the success message so users don't think it's broken
+// when their old email still works for login afterward.
+//
+// Re-auth is required: changing the recovery channel is the kind of
+// thing a session-hijacker would do, so we always confirm the password
+// before initiating the change.
+export async function changeEmailAction(
+  _prev: AuthFormState,
+  form: FormData,
+): Promise<AuthFormState> {
+  const newEmail = readString(form, "new_email").toLowerCase();
+  const password = readString(form, "password");
+
+  if (!newEmail || !newEmail.includes("@")) {
+    return { error: "Enter a valid email address." };
+  }
+  if (!password) {
+    return { error: "Confirm your password to change email." };
+  }
+
+  const sb = await createServerClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user || !user.email) {
+    return { error: "You must be signed in." };
+  }
+  if (newEmail === user.email.toLowerCase()) {
+    return { error: "That's already your email." };
+  }
+
+  const { error: reauthError } = await sb.auth.signInWithPassword({
+    email: user.email,
+    password,
+  });
+  if (reauthError) {
+    return { error: "Password incorrect." };
+  }
+
+  // Ask Supabase to dispatch the confirmation link. The new email isn't
+  // active until the user clicks it; emailRedirectTo brings them back to
+  // /account so they see the updated address.
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const { error: updateError } = await sb.auth.updateUser(
+    { email: newEmail },
+    { emailRedirectTo: `${origin}/auth/callback?next=/account` },
+  );
+  if (updateError) {
+    return { error: updateError.message };
+  }
+
+  return {
+    info: `Confirmation link sent to ${newEmail}. Click it to finish the change — your old email keeps working until then.`,
+  };
+}
+
 // ---------------- change password ----------------
 
 export async function changePasswordAction(
