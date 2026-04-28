@@ -503,14 +503,14 @@ export default async function RookiesPage({
           {INCOMING_CLASS_YEAR} Rookie Class
         </h1>
         <p className="text-sm text-zinc-500 mt-1">
-          Pre-draft consensus grades + post-draft rookie prior DPV (draft
+          Pre-draft consensus grades + post-draft rookie prior PYV (draft
           capital, landing spot, combine, and intra-class depth). Updates as
           picks come in.
         </p>
         <p className="text-xs text-zinc-400 mt-1 tabular-nums">
           {draftedCount}/{totalCount} drafted · {teamKnownCount} with team
           {sleeperFallbackCount > 0 ? ` (${sleeperFallbackCount} via Sleeper)` : ""} ·{" "}
-          {rows.filter((r) => r.dpv !== null).length} with DPV prior
+          {rows.filter((r) => r.dpv !== null).length} with PYV prior
         </p>
       </div>
 
@@ -562,7 +562,7 @@ export default async function RookiesPage({
           </Link>
           <Link
             href={buildHref({ sf: "1" })}
-            title="Superflex / 2-QB leagues — re-inflates rookie QB DPV."
+            title="Superflex / 2-QB leagues — re-inflates rookie QB PYV."
             className={`px-3 py-1.5 ${
               superflex
                 ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
@@ -593,10 +593,10 @@ export default async function RookiesPage({
                 <th className="px-3 py-2 text-right w-16">Grade</th>
                 <th className="px-3 py-2 text-right w-14">RAS</th>
                 <th className="px-3 py-2 text-right w-14">40</th>
-                <th className="px-3 py-2 text-right w-20">DPV</th>
+                <th className="px-3 py-2 text-right w-20">PYV</th>
                 <th
                   className="px-3 py-2 text-center w-16"
-                  title="Equivalent pick in a 12-team rookie draft, ranked by DPV"
+                  title="Equivalent pick in a 12-team rookie draft, ranked by PYV"
                 >
                   Pick
                 </th>
@@ -638,8 +638,8 @@ export default async function RookiesPage({
                         <span
                           title={
                             badge.tone === "buy"
-                              ? `DPV ranks ${r.marketDelta} spots higher than market within ${r.position}`
-                              : `Market ranks ${Math.abs(r.marketDelta ?? 0)} spots higher than DPV within ${r.position}`
+                              ? `PYV ranks ${r.marketDelta} spots higher than market within ${r.position}`
+                              : `Market ranks ${Math.abs(r.marketDelta ?? 0)} spots higher than PYV within ${r.position}`
                           }
                           className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
                             badge.tone === "buy"
@@ -711,7 +711,7 @@ export default async function RookiesPage({
                         ? "text-emerald-600 dark:text-emerald-400 font-medium"
                         : r.ras >= 5
                         ? "text-zinc-600 dark:text-zinc-300"
-                        : "text-rose-600 dark:text-rose-400"
+                        : "text-red-600 dark:text-red-400"
                     }`}
                   >
                     {r.ras !== null ? r.ras.toFixed(1) : "—"}

@@ -1,9 +1,13 @@
-# DPV — Dynasty Player Valuation
+# Pylon — Dynasty Player Valuation
 
 A data-driven dynasty fantasy football valuation engine. Combines weighted
 production, position-specific aging curves, opportunity metrics, situation
-modifiers, and positional scarcity into a single `DPV` score normalized to
-0–10,000.
+modifiers, and positional scarcity into a single `PYV` (Pylon Value) score
+normalized to 0–10,000.
+
+The internal codebase still uses `dpv` as the identifier for the score
+(table names, function names, type names) — that's a legacy naming choice,
+not a typo. User-facing labels are all `PYV`.
 
 Built with Next.js, TypeScript, Supabase, and Python (for nflverse ingestion).
 
@@ -39,7 +43,7 @@ Built with Next.js, TypeScript, Supabase, and Python (for nflverse ingestion).
    ./.venv/Scripts/python -u scripts/ingest.py
    ```
 
-5. Compute DPV snapshots for all players:
+5. Compute PYV snapshots for all players:
 
    ```bash
    npx tsx scripts/compute-dpv.ts

@@ -3,15 +3,15 @@ export default function MethodologyPage() {
     <div className="prose prose-zinc dark:prose-invert max-w-none">
       <h1 className="text-2xl font-semibold tracking-tight">Methodology</h1>
       <p className="text-zinc-500 text-sm mt-1">
-        The shape of how DPV (Dynasty Player Valuation) is computed — what
-        goes in, why each piece is there, and how they combine.
+        The shape of how PYV (Pylon Value — our dynasty score) is computed
+        — what goes in, why each piece is there, and how they combine.
       </p>
 
       <section className="mt-6 space-y-4 text-sm leading-6">
         <div>
           <h2 className="font-semibold text-base">The short version</h2>
           <p>
-            DPV blends what a player is producing right now, how that
+            PYV blends what a player is producing right now, how that
             production tends to age, the size of the role they&apos;re
             stepping into, the team context around them, and a positional
             scarcity adjustment that respects league construction. Each
@@ -54,7 +54,7 @@ export default function MethodologyPage() {
             fall hardest, WRs hold a high plateau into their late twenties,
             TEs ramp later and hold their value longer, QBs are the most
             forgiving of the four. The curve shape matters more than any
-            single multiplier — DPV reflects the trajectory, not just the
+            single multiplier — PYV reflects the trajectory, not just the
             current snapshot.
           </p>
         </div>
@@ -105,7 +105,7 @@ export default function MethodologyPage() {
           <p>
             A top-3 player at a thin position is worth more than a top-3
             player at a deep one — that&apos;s the whole point of trading
-            across positions in dynasty. DPV applies a scarcity adjustment
+            across positions in dynasty. PYV applies a scarcity adjustment
             that boosts the top of each position group and discounts the
             deep bench. The default scaling assumes standard 12-team
             league construction; on the trade page, values recalibrate to
@@ -119,10 +119,10 @@ export default function MethodologyPage() {
           <h2 className="font-semibold text-base">Market calibration</h2>
           <p>
             FantasyCalc dynasty trade values are pulled per scoring format
-            and shown alongside DPV with a delta column. Where the two
-            disagree, the delta flags potential buys (DPV values the
+            and shown alongside PYV with a delta column. Where the two
+            disagree, the delta flags potential buys (PYV values the
             player higher than the market) and potential sells (market
-            higher than DPV) — a value-vs-perception read, not a price
+            higher than PYV) — a value-vs-perception read, not a price
             replacement.
           </p>
         </div>
@@ -142,7 +142,7 @@ export default function MethodologyPage() {
           </p>
           <p>
             What happened to those comps over the next three NFL seasons
-            blends into a forward projection that nudges DPV. The closer
+            blends into a forward projection that nudges PYV. The closer
             the comp set, the more weight the trajectory carries; loose
             matches contribute little. In the common case the production
             and context model still dominates, but the long-horizon
@@ -227,7 +227,7 @@ export default function MethodologyPage() {
             prior fades. A player who logged only a handful of games
             across their first two seasons gets priced as a depth flier,
             not a fresh rookie. Once a qualifying season of real
-            production lands, the standard DPV pipeline takes over.
+            production lands, the standard PYV pipeline takes over.
           </p>
         </div>
 
@@ -266,7 +266,7 @@ export default function MethodologyPage() {
           <ul className="list-disc pl-6 space-y-1">
             <li>
               Percentile-based market delta to neutralize scale gaps
-              between DPV and FantasyCalc
+              between PYV and FantasyCalc
             </li>
             <li>
               More prospect sources (NFL.com, ESPN, PFF) to reduce

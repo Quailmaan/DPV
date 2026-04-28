@@ -32,7 +32,7 @@ export default function SyncLeagueForm() {
         </button>
       </div>
       {state.error && (
-        <div className="text-sm text-rose-600 dark:text-rose-400">
+        <div className="text-sm text-red-600 dark:text-red-400">
           {state.error}
         </div>
       )}

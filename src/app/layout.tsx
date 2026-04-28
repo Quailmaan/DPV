@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { PylonWordmark } from "@/components/PylonLogo";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DPV — Dynasty Player Valuation",
+  title: "Pylon — Dynasty Player Valuation",
   description:
     "Data-driven dynasty fantasy football values with historical comps and market calibration.",
 };
@@ -32,9 +33,12 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
         <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
           <div className="mx-auto max-w-6xl px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3 flex-wrap">
-            <Link href="/" className="font-semibold tracking-tight text-lg whitespace-nowrap">
-              DPV{" "}
-              <span className="text-zinc-400 font-normal hidden sm:inline">
+            <Link
+              href="/"
+              className="flex items-baseline gap-2 whitespace-nowrap"
+            >
+              <PylonWordmark size="md" />
+              <span className="text-zinc-400 text-sm hidden sm:inline">
                 / Dynasty Values
               </span>
             </Link>

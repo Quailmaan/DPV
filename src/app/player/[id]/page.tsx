@@ -122,7 +122,7 @@ function rasColorClass(v: number | null): string {
   if (v === null) return "text-zinc-400";
   if (v >= 8) return "text-emerald-600 dark:text-emerald-400 font-semibold";
   if (v >= 5) return "text-zinc-700 dark:text-zinc-200";
-  return "text-rose-600 dark:text-rose-400";
+  return "text-red-600 dark:text-red-400";
 }
 
 function hsmLabel(v: string): string {
@@ -430,7 +430,7 @@ export default async function PlayerPage({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
           <div className="text-xs uppercase tracking-wider text-zinc-500">
-            DPV
+            PYV
           </div>
           <div className="text-4xl font-bold tabular-nums mt-1">
             {snapshot?.dpv ?? "—"}
@@ -452,7 +452,7 @@ export default async function PlayerPage({
             ) : (
               <>
                 <span className="text-zinc-500">
-                  DPV {player.position}
+                  PYV {player.position}
                   {dpvPosRank} · Market {player.position}
                   {mktPosRank}
                 </span>
@@ -461,7 +461,7 @@ export default async function PlayerPage({
                     marketDelta > 0
                       ? "text-emerald-600 dark:text-emerald-400"
                       : marketDelta < 0
-                      ? "text-rose-600 dark:text-rose-400"
+                      ? "text-red-600 dark:text-red-400"
                       : "text-zinc-500"
                   }`}
                 >
@@ -511,9 +511,9 @@ export default async function PlayerPage({
         <div className="mb-8">
           <h2 className="text-lg font-semibold mb-3">Rookie Prior</h2>
           <div className="rounded-md border border-amber-200 dark:border-amber-900/60 bg-amber-50/40 dark:bg-amber-950/20 p-4 mb-3 text-sm text-amber-900 dark:text-amber-200">
-            This player has no qualifying NFL season yet. DPV is a
+            This player has no qualifying NFL season yet. PYV is a
             forward-looking prior based on draft capital, landing spot, and
-            age. Replaced by a production-based DPV as soon as they log 7+
+            age. Replaced by a production-based PYV as soon as they log 7+
             games in a season.
             {(priorBreakdown.missedSeasons ?? 0) > 0 && (
               <span>
@@ -695,7 +695,7 @@ export default async function PlayerPage({
                 <div className="text-xs uppercase tracking-wider text-zinc-500">
                   Bust Rate
                 </div>
-                <div className="text-2xl font-bold tabular-nums mt-1 text-rose-600 dark:text-rose-400">
+                <div className="text-2xl font-bold tabular-nums mt-1 text-red-600 dark:text-red-400">
                   {hsm.summary.bustRate !== null
                     ? `${Math.round(hsm.summary.bustRate * 100)}%`
                     : "—"}

@@ -140,7 +140,7 @@ export default async function RankingsPage({
           Dynasty Rankings
         </h1>
         <p className="text-sm text-zinc-500 mt-1">
-          DPV score combines weighted production, age curve, opportunity,
+          PYV score combines weighted production, age curve, opportunity,
           situation, consistency, and market calibration.
         </p>
       </div>
@@ -191,7 +191,7 @@ export default async function RankingsPage({
 
       {filtered.length === 0 ? (
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 text-sm text-zinc-500">
-          No DPV snapshots yet.{" "}
+          No PYV snapshots yet.{" "}
           <span className="text-zinc-700 dark:text-zinc-300">
             Run <code className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs">npx tsx scripts/compute-dpv.ts</code> after ingestion.
           </span>
@@ -206,7 +206,7 @@ export default async function RankingsPage({
                 <th className="px-4 py-2 text-left w-16">Pos</th>
                 <th className="px-4 py-2 text-left w-20">Team</th>
                 <th className="px-4 py-2 text-right w-16">Age</th>
-                <th className="px-4 py-2 text-right w-24">DPV</th>
+                <th className="px-4 py-2 text-right w-24">PYV</th>
                 <th className="px-4 py-2 text-right w-24">Market</th>
                 <th className="px-4 py-2 text-right w-20">Δ</th>
                 <th className="px-4 py-2 text-left w-36">Tier</th>
@@ -264,17 +264,17 @@ export default async function RankingsPage({
                           : delta > 0
                           ? "text-emerald-600 dark:text-emerald-400"
                           : delta < 0
-                          ? "text-rose-600 dark:text-rose-400"
+                          ? "text-red-600 dark:text-red-400"
                           : "text-zinc-500"
                       }`}
                       title={
                         delta === null
                           ? "No market data"
                           : delta > 0
-                          ? `DPV ranks ${delta} spots higher than market (potential buy)`
+                          ? `PYV ranks ${delta} spots higher than market (potential buy)`
                           : delta < 0
-                          ? `Market ranks ${-delta} spots higher than DPV (potential sell)`
-                          : "Same rank in DPV and market"
+                          ? `Market ranks ${-delta} spots higher than PYV (potential sell)`
+                          : "Same rank in PYV and market"
                       }
                     >
                       {delta === null

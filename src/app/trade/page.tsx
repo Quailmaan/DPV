@@ -352,7 +352,7 @@ export default async function TradePage({
           Trade Calculator
         </h1>
         <p className="text-sm text-zinc-500 mt-1">
-          Add players to each side and get a verdict based on DPV totals,
+          Add players to each side and get a verdict based on PYV totals,
           scarcity, and age profile.
           {leagueName && (
             <span className="ml-1 text-zinc-400">

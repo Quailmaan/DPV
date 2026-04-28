@@ -5,13 +5,13 @@ import {
 
 const TONE_DOT: Record<LandingSpotBullet["tone"], string> = {
   pro: "bg-emerald-500",
-  con: "bg-rose-500",
+  con: "bg-red-500",
   neutral: "bg-zinc-400 dark:bg-zinc-500",
 };
 
 const TONE_PILL: Record<LandingSpotBullet["tone"], string> = {
   pro: "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200",
-  con: "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200",
+  con: "border-red-300 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200",
   neutral:
     "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300",
 };

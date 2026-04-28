@@ -161,7 +161,7 @@ function situationLines(opts: {
     );
   } else {
     lines.push(
-      "Landing spot will swing his Year-1 outlook materially. The Pre-Draft DPV refines the moment the team is announced.",
+      "Landing spot will swing his Year-1 outlook materially. The Pre-Draft PYV refines the moment the team is announced.",
     );
   }
 
@@ -544,7 +544,7 @@ export default async function ProspectPage({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <div className="rounded-md border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 p-5">
             <div className="text-xs uppercase tracking-wider text-emerald-700 dark:text-emerald-300 flex items-center gap-2 flex-wrap">
-              Pre-Draft DPV
+              Pre-Draft PYV
               <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded">
                 Projected
               </span>
@@ -819,7 +819,7 @@ export default async function ProspectPage({
       {!linkedPlayer && !landingTeam && (
         <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 p-4 text-sm text-zinc-600 dark:text-zinc-400">
           <b className="text-zinc-800 dark:text-zinc-200">No NFL team yet.</b>{" "}
-          Rookie prior DPV, combine athleticism, and landing-spot modifiers
+          Rookie prior PYV, combine athleticism, and landing-spot modifiers
           unlock once this prospect is drafted. The full player profile will
           appear here automatically after the nightly refresh picks up their
           roster entry.

@@ -226,7 +226,7 @@ export default async function LeagueDetailPage({
             <tr>
               <th className="px-3 py-2 text-left w-10">#</th>
               <th className="px-3 py-2 text-left">Team</th>
-              <th className="px-3 py-2 text-right">Total DPV</th>
+              <th className="px-3 py-2 text-right">Total PYV</th>
               <th className="px-3 py-2 text-right">QB</th>
               <th className="px-3 py-2 text-right">RB</th>
               <th className="px-3 py-2 text-right">WR</th>
@@ -246,7 +246,7 @@ export default async function LeagueDetailPage({
                   diff > 0.2
                     ? "text-emerald-600 dark:text-emerald-400 font-medium"
                     : diff < -0.2
-                    ? "text-rose-600 dark:text-rose-400 font-medium"
+                    ? "text-red-600 dark:text-red-400 font-medium"
                     : "text-zinc-500";
                 return (
                   <td
@@ -318,7 +318,7 @@ export default async function LeagueDetailPage({
                   <th className="px-3 py-2 text-left">Pos</th>
                   <th className="px-3 py-2 text-left">Team</th>
                   <th className="px-3 py-2 text-right">Age</th>
-                  <th className="px-3 py-2 text-right">DPV</th>
+                  <th className="px-3 py-2 text-right">PYV</th>
                   <th className="px-3 py-2 text-left">Tier</th>
                 </tr>
               </thead>
@@ -407,7 +407,7 @@ export default async function LeagueDetailPage({
               <th className="px-3 py-2 text-left">Pos</th>
               <th className="px-3 py-2 text-left">Team</th>
               <th className="px-3 py-2 text-right">Age</th>
-              <th className="px-3 py-2 text-right">DPV</th>
+              <th className="px-3 py-2 text-right">PYV</th>
               <th className="px-3 py-2 text-left">Tier</th>
             </tr>
           </thead>

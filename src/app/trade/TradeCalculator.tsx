@@ -75,7 +75,7 @@ function buySellBadge(
 
 const BUY_SELL_CLASS: Record<"buy" | "sell", string> = {
   buy: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
-  sell: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  sell: "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300",
 };
 
 function sideValue(
@@ -185,7 +185,7 @@ function verdictFor(
     return {
       label: "Solid Win",
       flavor: "Both production and market lean your way.",
-      explanation: `DPV ${fmtPct(dpvPctRound)}, market ${fmtPct(mktPctRound)}. Real value gain, fairly priced trade.${ageNote}`,
+      explanation: `PYV ${fmtPct(dpvPctRound)}, market ${fmtPct(mktPctRound)}. Real value gain, fairly priced trade.${ageNote}`,
       tone: "win",
       dpvPct,
       marketPct,
@@ -197,7 +197,7 @@ function verdictFor(
     return {
       label: "Buy-Low Steal",
       flavor:
-        "DPV sees real value the market hasn't priced in. Print this trade.",
+        "PYV sees real value the market hasn't priced in. Print this trade.",
       explanation: `Model says you gain ${fmtPct(dpvPctRound)} of production, but market would call this ${fmtPct(mktPctRound)} against you — meaning the league at large would view it close to fair, possibly even in their favor. The disagreement IS the alpha.${ageNote}`,
       tone: "win",
       dpvPct,
@@ -210,7 +210,7 @@ function verdictFor(
     return {
       label: "Solid Win",
       flavor: "Production gain at a fair-market price.",
-      explanation: `DPV ${fmtPct(dpvPctRound)} in your favor; market reads roughly even (${fmtPct(mktPctRound)}). Clean win.${ageNote}`,
+      explanation: `PYV ${fmtPct(dpvPctRound)} in your favor; market reads roughly even (${fmtPct(mktPctRound)}). Clean win.${ageNote}`,
       tone: "win",
       dpvPct,
       marketPct,
@@ -223,7 +223,7 @@ function verdictFor(
       label: "Sell-High",
       flavor:
         "Production unchanged but the market thinks you cleaned them out.",
-      explanation: `DPV reads roughly even (${fmtPct(dpvPctRound)}) but you gain ${fmtPct(mktPctRound)} of market value — you're cashing in on hype before it cools. Solid take.${ageNote}`,
+      explanation: `PYV reads roughly even (${fmtPct(dpvPctRound)}) but you gain ${fmtPct(mktPctRound)} of market value — you're cashing in on hype before it cools. Solid take.${ageNote}`,
       tone: "win",
       dpvPct,
       marketPct,
@@ -235,7 +235,7 @@ function verdictFor(
     return {
       label: "Fair Trade",
       flavor: "Roughly balanced on both axes — comes down to roster fit.",
-      explanation: `DPV within ${Math.abs(dpvPctRound)}% and market within ${Math.abs(mktPctRound)}%. If this fills a hole or consolidates roster spots, take it.${ageNote}`,
+      explanation: `PYV within ${Math.abs(dpvPctRound)}% and market within ${Math.abs(mktPctRound)}%. If this fills a hole or consolidates roster spots, take it.${ageNote}`,
       tone: "fair",
       dpvPct,
       marketPct,
@@ -246,7 +246,7 @@ function verdictFor(
   if (dpvCls === "neutral" && mktCls === "neg") {
     return {
       label: "Hidden Value",
-      flavor: "DPV stays even but market thinks you lost slightly.",
+      flavor: "PYV stays even but market thinks you lost slightly.",
       explanation: `Production roughly unchanged (${fmtPct(dpvPctRound)}); market trails you ${fmtPct(mktPctRound)}. You see something the league doesn't — defensible if your roster needs the swap.${ageNote}`,
       tone: "fair",
       dpvPct,
@@ -259,7 +259,7 @@ function verdictFor(
     return {
       label: "Lean Reject",
       flavor: "Production loss without market compensation.",
-      explanation: `DPV ${fmtPct(dpvPctRound)} against you, market reads even (${fmtPct(mktPctRound)}). Ask for a throw-in or pass.${ageNote}`,
+      explanation: `PYV ${fmtPct(dpvPctRound)} against you, market reads even (${fmtPct(mktPctRound)}). Ask for a throw-in or pass.${ageNote}`,
       tone: "loss",
       dpvPct,
       marketPct,
@@ -275,7 +275,7 @@ function verdictFor(
       label: "Calculated Sell-High",
       flavor:
         "Slight production loss but big market gain. Hype-sell if you can replace the points.",
-      explanation: `DPV ${fmtPct(dpvPctRound)} against you; market ${fmtPct(mktPctRound)} in your favor. The league overpays for the brand — only take it if you have a plug-in replacement on the wire or in your league.${ageNote}`,
+      explanation: `PYV ${fmtPct(dpvPctRound)} against you; market ${fmtPct(mktPctRound)} in your favor. The league overpays for the brand — only take it if you have a plug-in replacement on the wire or in your league.${ageNote}`,
       tone: "fair",
       dpvPct,
       marketPct,
@@ -297,7 +297,7 @@ function verdictFor(
   return {
     label: "Lean Reject",
     flavor: "Both production and market tilt against you.",
-    explanation: `DPV ${fmtPct(dpvPctRound)} and market ${fmtPct(mktPctRound)} against you. Pass.${ageNote}`,
+    explanation: `PYV ${fmtPct(dpvPctRound)} and market ${fmtPct(mktPctRound)} against you. Pass.${ageNote}`,
     tone: "loss",
     dpvPct,
     marketPct,
@@ -420,7 +420,7 @@ export default function TradeCalculator({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <TradeSide
           title="Giving"
-          accent="rose"
+          accent="red"
           players={players}
           taken={taken}
           side={giving}
@@ -479,7 +479,7 @@ function TradeSide({
   rosterLabel,
 }: {
   title: string;
-  accent: "rose" | "emerald";
+  accent: "red" | "emerald";
   players: TradePlayer[];
   taken: Set<string>;
   side: TradePlayer[];
@@ -509,8 +509,8 @@ function TradeSide({
   }, [query, players, taken, rosterPlayerIds]);
 
   const badgeColor =
-    accent === "rose"
-      ? "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+    accent === "red"
+      ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
       : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
 
   return (
@@ -672,8 +672,8 @@ function TradeSide({
                       className={`text-[10px] font-bold tracking-wider px-1 py-0.5 rounded flex-shrink-0 ${BUY_SELL_CLASS[b.tone]}`}
                       title={
                         b.tone === "buy"
-                          ? "DPV ranks this player higher than the market"
-                          : "Market ranks this player higher than DPV"
+                          ? "PYV ranks this player higher than the market"
+                          : "Market ranks this player higher than PYV"
                       }
                     >
                       {b.label}
@@ -688,7 +688,7 @@ function TradeSide({
                   onClick={() =>
                     setSide(side.filter((_, idx) => idx !== i))
                   }
-                  className="text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 text-sm"
+                  className="text-zinc-400 hover:text-red-600 dark:hover:text-red-400 text-sm"
                   aria-label={`Remove ${p.name}`}
                 >
                   ×
@@ -721,9 +721,9 @@ function VerdictCard({
       "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100",
     win: "border-emerald-200 bg-emerald-50/60 text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-100",
     fair: "border-zinc-200 bg-zinc-50 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100",
-    loss: "border-rose-200 bg-rose-50/60 text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-100",
+    loss: "border-red-200 bg-red-50/60 text-red-900 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-100",
     loss_big:
-      "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100",
+      "border-red-300 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100",
   };
 
   // Only render the market axis line if at least one side actually has any
@@ -745,7 +745,7 @@ function VerdictCard({
     pct > 0.05
       ? "text-emerald-700 dark:text-emerald-300"
       : pct < -0.05
-        ? "text-rose-700 dark:text-rose-300"
+        ? "text-red-700 dark:text-red-300"
         : "text-zinc-500";
 
   return (
@@ -782,7 +782,7 @@ function VerdictCard({
             {fmtDelta(getting.var_ - giving.var_)} · {fmtPct(verdict.dpvPct)}
           </div>
 
-          <div className="font-medium opacity-70">DPV (raw)</div>
+          <div className="font-medium opacity-70">PYV (raw)</div>
           <div className="opacity-70">{Math.round(giving.dpv).toLocaleString()}</div>
           <div className="opacity-70">{Math.round(getting.dpv).toLocaleString()}</div>
           <div className="text-right opacity-70">
@@ -805,7 +805,7 @@ function VerdictCard({
               <div className="font-medium opacity-60">Market (price)</div>
               <div className="opacity-60 col-span-3 italic text-xs">
                 No FantasyCalc data on either side (picks or unranked rookies
-                only) — falling back to DPV verdict.
+                only) — falling back to PYV verdict.
               </div>
             </>
           )}
@@ -877,9 +877,9 @@ function ScarcityPanel({
         ))}
       </div>
       <div className="text-[11px] text-zinc-500 mt-2 leading-snug">
-        Verdict math is on VAR (DPV minus the replacement cliff at each
-        position). A 9000-DPV TE in a 1-TE league trades for more than a
-        9000-DPV QB in a 1-QB league because the TE cliff sits much lower.
+        Verdict math is on VAR (PYV minus the replacement cliff at each
+        position). A 9000-PYV TE in a 1-TE league trades for more than a
+        9000-PYV QB in a 1-QB league because the TE cliff sits much lower.
       </div>
     </div>
   );
