@@ -120,6 +120,12 @@ export default async function RootLayout({
                   >
                     Methodology
                   </Link>
+                  <Link
+                    href="/pricing"
+                    className="hover:text-zinc-900 dark:hover:text-zinc-100"
+                  >
+                    Pricing
+                  </Link>
                 </nav>
                 <div className="order-2 sm:order-3 ml-auto">
                   <HeaderAuth />

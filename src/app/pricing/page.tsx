@@ -22,9 +22,10 @@ export default async function PricingPage() {
       <div className="text-center mb-10">
         <h1 className="text-3xl font-semibold tracking-tight">Pricing</h1>
         <p className="text-sm text-zinc-500 mt-2 max-w-xl mx-auto">
-          Browse rankings free, forever. Pro unlocks the tools that help you
-          actually win your league — multi-league sync, league-aware trade
-          tools, roster reports, and trade finder.
+          Browse rankings free, forever. Pro unlocks unlimited leagues and
+          the league-aware tools that turn the data into actual decisions.
+          More Pro features ship every couple of weeks — your subscription
+          covers them as they land.
         </p>
       </div>
 
@@ -40,11 +41,11 @@ export default async function PricingPage() {
           </p>
           <ul className="text-sm space-y-2 mb-6">
             <Bullet>Full PYV rankings &amp; methodology</Bullet>
+            <Bullet>Rookie rankings &amp; pre-draft prospects</Bullet>
             <Bullet>1 synced Sleeper league</Bullet>
             <Bullet>Universal trade calculator</Bullet>
-            <Bullet>Power rankings &amp; team pages</Bullet>
-            <Bullet>Contender vs. rebuilder verdict</Bullet>
-            <Bullet>Mock trade A/B</Bullet>
+            <Bullet>League power rankings &amp; team pages</Bullet>
+            <Bullet>Player pages with HSM comps</Bullet>
           </ul>
           <div className="text-xs text-zinc-500">
             {session ? (
@@ -76,20 +77,26 @@ export default async function PricingPage() {
             Or <span className="font-semibold">$59/year</span> — 30% off
             monthly. Cancel anytime.
           </p>
-          <ul className="text-sm space-y-2 mb-6">
+          <ul className="text-sm space-y-2 mb-4">
             <Bullet pro>Everything in Free</Bullet>
             <Bullet pro>
               <strong>Unlimited</strong> synced leagues
             </Bullet>
             <Bullet pro>League-aware trade calculator</Bullet>
-            <Bullet pro>Roster report card</Bullet>
-            <Bullet pro>Trade finder</Bullet>
-            <Bullet pro>Sell-window indicator</Bullet>
             <Bullet pro>Buy/Sell market signals</Bullet>
-            <Bullet pro>Top 5 HSM comps + similarity scores</Bullet>
-            <Bullet pro>Weekly email digest</Bullet>
-            <Bullet pro>CSV export</Bullet>
           </ul>
+          <div className="mb-6 rounded-md border border-emerald-200/60 dark:border-emerald-900/60 bg-emerald-100/40 dark:bg-emerald-950/30 p-3">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-400 mb-1.5">
+              Coming soon — included in Pro
+            </div>
+            <ul className="text-xs space-y-1 text-zinc-700 dark:text-zinc-300">
+              <ComingSoon>Roster report card (contender vs. rebuild verdict)</ComingSoon>
+              <ComingSoon>Trade finder</ComingSoon>
+              <ComingSoon>Sell-window indicator</ComingSoon>
+              <ComingSoon>Weekly email digest</ComingSoon>
+              <ComingSoon>CSV export</ComingSoon>
+            </ul>
+          </div>
 
           {!session ? (
             <Link
@@ -144,6 +151,30 @@ function Bullet({
         aria-hidden="true"
       >
         <path d="M5 12l5 5L20 7" />
+      </svg>
+      <span>{children}</span>
+    </li>
+  );
+}
+
+// Roadmap row — features promised in Pro but not yet shipped. Distinct
+// styling so users see them as "soon" instead of mistakenly thinking
+// they're already available. Honest > slick when you're new.
+function ComingSoon({ children }: { children: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-2">
+      <svg
+        className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-emerald-600/70"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
       </svg>
       <span>{children}</span>
     </li>
