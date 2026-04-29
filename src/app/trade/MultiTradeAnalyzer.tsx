@@ -90,9 +90,7 @@ export default function MultiTradeAnalyzer({
   if (!isPro) {
     return (
       <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-6">
-        <h2 className="text-lg font-semibold mb-1">
-          Multi-Team Trade Analyzer
-        </h2>
+        <h2 className="text-lg font-semibold mb-1">Trade Lab</h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-3">
           Analyze 2-, 3-, and N-team trades using the same PYV/market blend
           the trade finder uses. League-aware: pulls your synced rosters,
@@ -111,12 +109,10 @@ export default function MultiTradeAnalyzer({
   if (myLeagues.length === 0) {
     return (
       <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-6">
-        <h2 className="text-lg font-semibold mb-1">
-          Multi-Team Trade Analyzer
-        </h2>
+        <h2 className="text-lg font-semibold mb-1">Trade Lab</h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-3">
-          Sync a league first — the analyzer needs your rosters and picks
-          to price the assets correctly.
+          Sync a league first — the lab needs your rosters and picks to
+          price the assets correctly.
         </p>
         <Link
           href="/league"

@@ -111,7 +111,7 @@ export default async function TradePage({
       <div>
         <div className="mb-4">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Multi-Team Trade Analyzer
+            Trade Lab
           </h1>
           <p className="text-sm text-zinc-500 mt-1">
             Build a 2-, 3-, or up-to-6-team trade from your synced league.
@@ -558,7 +558,7 @@ function ToolTabs({
             : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200")
         }
       >
-        Multi-Team Analyzer
+        Trade Lab
         <span className="ml-1.5 inline-block rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide">
           Pro
         </span>
