@@ -144,9 +144,17 @@ export async function generateTradeNarrative(
   result: AnalyzeTradeResult,
 ): Promise<TradeNarrative | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.warn(
+      "[multi-trade narrative] ANTHROPIC_API_KEY not set — skipping narrative.",
+    );
+    return null;
+  }
 
-  const model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+  // Default to a stable Haiku alias that always resolves to a current
+  // production model. Set ANTHROPIC_MODEL to override (e.g. when a newer
+  // Haiku ships).
+  const model = process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-latest";
   const client = new Anthropic({ apiKey });
 
   const payload = buildPayload(result);
@@ -174,13 +182,27 @@ export async function generateTradeNarrative(
     // Find the tool_use block. With tool_choice forced this should always
     // be present, but be defensive.
     const toolUse = response.content.find((b) => b.type === "tool_use");
-    if (!toolUse || toolUse.type !== "tool_use") return null;
+    if (!toolUse || toolUse.type !== "tool_use") {
+      console.warn(
+        `[multi-trade narrative] no tool_use block in response (model=${model}).`,
+      );
+      return null;
+    }
 
     const parsed = parseToolInput(toolUse.input, result);
+    if (!parsed) {
+      console.warn(
+        `[multi-trade narrative] tool input failed validation (model=${model}).`,
+      );
+    }
     return parsed;
   } catch (err) {
-    // Non-fatal: log and let the UI fall back to numbers-only.
-    console.warn("[multi-trade narrative] generation failed:", err);
+    // Non-fatal: log loudly so a misconfigured deploy is obvious in
+    // Vercel logs, then let the UI fall back to numbers-only.
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error(
+      `[multi-trade narrative] generation failed (model=${model}): ${detail}`,
+    );
     return null;
   }
 }
