@@ -294,6 +294,88 @@ export async function changeEmailAction(
   };
 }
 
+// ---------------- forgot password (request reset link) ----------------
+
+// Sends a Supabase password-recovery email. The link in the email points
+// at /auth/callback?next=/reset-password — the callback exchanges the code
+// for a (recovery) session and bounces the user to /reset-password where
+// they pick a new one.
+//
+// We deliberately return the same generic info message whether or not the
+// email exists. Confirming existence here would let an attacker enumerate
+// accounts; the email itself is the side-channel that tells real owners
+// they got a link.
+export async function requestPasswordResetAction(
+  _prev: AuthFormState,
+  form: FormData,
+): Promise<AuthFormState> {
+  const email = readString(form, "email").toLowerCase();
+  if (!email || !email.includes("@")) {
+    return { error: "Enter a valid email address." };
+  }
+
+  const sb = await createServerClient();
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/auth/callback?next=/reset-password`,
+  });
+
+  // Swallow the specific error and surface a generic message — see comment
+  // above. We still log nothing because Supabase logs request failures on
+  // their side; nothing actionable for us to capture here.
+  if (error) {
+    return {
+      info: "If that email is registered, a reset link is on its way.",
+    };
+  }
+
+  return {
+    info: "If that email is registered, a reset link is on its way. Check your inbox (and spam).",
+  };
+}
+
+// ---------------- reset password (set a new one via recovery link) ----------------
+
+// Used by /reset-password. Assumes the caller already has a valid Supabase
+// session — that's true after the recovery link goes through
+// /auth/callback. We still re-check getUser() so an unauthenticated POST
+// gets a clean error rather than a confusing Supabase one.
+export async function setNewPasswordAction(
+  _prev: AuthFormState,
+  form: FormData,
+): Promise<AuthFormState> {
+  const newPassword = readString(form, "new_password");
+  const confirmPassword = readString(form, "confirm_password");
+
+  if (newPassword.length < 8) {
+    return { error: "Password must be at least 8 characters." };
+  }
+  if (newPassword !== confirmPassword) {
+    return { error: "Passwords don't match." };
+  }
+
+  const sb = await createServerClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) {
+    return {
+      error:
+        "Reset link expired or already used. Request a new one from the login page.",
+    };
+  }
+
+  const { error } = await sb.auth.updateUser({ password: newPassword });
+  if (error) {
+    return { error: error.message };
+  }
+
+  // Send them into the app — they're already signed in via the recovery
+  // session and the new password is now live.
+  revalidatePath("/", "layout");
+  redirect("/league");
+}
+
 // ---------------- change password ----------------
 
 export async function changePasswordAction(
