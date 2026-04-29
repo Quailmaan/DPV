@@ -152,9 +152,10 @@ export async function generateTradeNarrative(
   }
 
   // Default to the current production Haiku. Anthropic retired the
-  // `-latest` aliases for the 3.5 line; the post-deprecation generation
-  // uses bare semver IDs (claude-haiku-4-5). Override via ANTHROPIC_MODEL
-  // when a newer Haiku ships.
+  // `-latest` aliases for the 3.5 line on Feb 19 2026; the
+  // post-deprecation generation uses bare semver IDs
+  // (claude-haiku-4-5). Override via ANTHROPIC_MODEL when a newer
+  // Haiku ships.
   const model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
   const client = new Anthropic({ apiKey });
 
