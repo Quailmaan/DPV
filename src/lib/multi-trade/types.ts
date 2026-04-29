@@ -94,6 +94,26 @@ export type AnalyzeTradeResult = {
   teams: TeamSummary[];
   /** Soft warnings — e.g. "young-player guard fired", "missing market data". */
   notes: string[];
+  /**
+   * Plain-English explanation of the trade for casual users. Generated
+   * by Claude from the deterministic numbers above — never used to
+   * change verdicts, only to phrase them. Null when the narrative
+   * service is disabled or fails (UI falls back to numbers-only).
+   */
+  narrative: TradeNarrative | null;
+};
+
+export type TradeNarrative = {
+  /** 2–4 sentence summary of the deal as a whole. */
+  overall: string;
+  /** Per-team take. Same rosterId as TeamSummary; 1–2 sentences each. */
+  teams: NarrativeTeamTake[];
+};
+
+export type NarrativeTeamTake = {
+  rosterId: number;
+  /** Plain-English explanation of why this side wins / loses / is fair. */
+  summary: string;
 };
 
 // Helper input bundle for the pricing function — pre-loaded data so the

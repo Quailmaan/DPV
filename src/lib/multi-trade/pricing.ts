@@ -190,5 +190,8 @@ export function priceTrade(
     gateThreshold: GATE_THRESHOLD,
     teams,
     notes,
+    // Narrative is layered on later by the action — pricing stays pure
+    // and synchronous so it can be unit-tested without mocking an LLM.
+    narrative: null,
   };
 }

@@ -655,12 +655,40 @@ function AssetLine({ asset }: { asset: AnalyzerRosterAsset }) {
 // ---- Result panel ---------------------------------------------------------
 
 function ResultPanel({ result }: { result: AnalyzeTradeResult }) {
+  // Narrative is opt-in: it's null when the API key is unset or the call
+  // failed. The numeric verdicts always render either way.
+  const narrative = result.narrative;
+  const summaryByRoster = new Map<number, string>();
+  if (narrative) {
+    for (const t of narrative.teams) summaryByRoster.set(t.rosterId, t.summary);
+  }
+
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-semibold">Analysis</h3>
+      {narrative && (
+        <div className="rounded-md border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/30 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="inline-block rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+              AI Summary
+            </span>
+            <span className="text-xs text-zinc-500">
+              Plain-English read on the deal — verdicts come from the
+              numbers, not the model.
+            </span>
+          </div>
+          <p className="text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed">
+            {narrative.overall}
+          </p>
+        </div>
+      )}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {result.teams.map((t) => (
-          <TeamResultCard key={t.rosterId} team={t} />
+          <TeamResultCard
+            key={t.rosterId}
+            team={t}
+            narrativeSummary={summaryByRoster.get(t.rosterId) ?? null}
+          />
         ))}
       </div>
       {result.notes.length > 0 && (
@@ -698,7 +726,13 @@ const VERDICT_LABEL: Record<TeamSummary["verdict"], string> = {
   loser: "Overpaying",
 };
 
-function TeamResultCard({ team }: { team: TeamSummary }) {
+function TeamResultCard({
+  team,
+  narrativeSummary,
+}: {
+  team: TeamSummary;
+  narrativeSummary: string | null;
+}) {
   const name = team.teamName?.trim() || team.ownerName;
   return (
     <div className={`rounded-md border p-4 ${VERDICT_COLOR[team.verdict]}`}>
@@ -709,6 +743,11 @@ function TeamResultCard({ team }: { team: TeamSummary }) {
           {team.failsGate && team.verdict !== "fair" && " · fails gate"}
         </div>
       </div>
+      {narrativeSummary && (
+        <p className="text-xs text-zinc-700 dark:text-zinc-200 leading-relaxed mb-3 italic">
+          {narrativeSummary}
+        </p>
+      )}
       <div className="text-xs text-zinc-600 dark:text-zinc-400 space-y-0.5 mb-3">
         <div>
           Receive total: <span className="font-medium tabular-nums">{team.receiveTotal.toLocaleString()}</span>

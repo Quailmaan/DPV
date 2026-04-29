@@ -24,6 +24,7 @@ import {
 } from "@/lib/picks/values";
 import type { ScoringFormat } from "@/lib/dpv/types";
 import { priceTrade } from "@/lib/multi-trade/pricing";
+import { generateTradeNarrative } from "@/lib/multi-trade/narrative";
 import type {
   AnalyzeTradeInput,
   AnalyzeTradeResult,
@@ -495,7 +496,13 @@ export async function analyzeMultiTrade(
     rostersById,
   };
 
-  return priceTrade(input, ctx);
+  const result = priceTrade(input, ctx);
+
+  // Layer the LLM narrative on top of the deterministic numbers. The
+  // narrative function returns null on missing API key / errors, which
+  // the UI handles gracefully by rendering numbers-only.
+  const narrative = await generateTradeNarrative(result);
+  return { ...result, narrative };
 }
 
 // ---- internal helpers -----------------------------------------------------
