@@ -2,11 +2,15 @@ import Link from "next/link";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createServerClient } from "@/lib/supabase/server";
 import type { ScoringFormat } from "@/lib/dpv/types";
+import { Pagination } from "@/components/Pagination";
+
+const PAGE_SIZE = 25;
 
 type SearchParams = Promise<{
   fmt?: string;
   pos?: string;
   q?: string;
+  page?: string;
 }>;
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
@@ -30,6 +34,9 @@ export default async function RankingsPage({
   const fmt: ScoringFormat = isScoringFormat(sp.fmt) ? sp.fmt : "HALF_PPR";
   const pos = (sp.pos || "ALL").toUpperCase();
   const q = (sp.q ?? "").trim();
+  // Page is 1-indexed in the URL. Clamp ≥ 1; the upper bound is enforced
+  // after we know how many filtered rows there are.
+  const requestedPage = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
   // Anonymous-visitor hero only renders when signed-out, so we resolve
   // the session up front. Signed-in users skip the marketing block and
@@ -112,13 +119,24 @@ export default async function RankingsPage({
     positionRanks.set(r.player_id, next);
   }
 
-  const filtered = rows
+  const filteredAll = rows
     .filter((r) => r.players)
     .filter((r) => (pos === "ALL" ? true : r.players!.position === pos))
     .filter((r) =>
       q ? r.players!.name.toLowerCase().includes(q.toLowerCase()) : true,
-    )
-    .slice(0, 300);
+    );
+
+  // Pagination — slice 25 rows per page out of the filtered list. We
+  // compute totalPages off the filtered count, clamp the requested page
+  // back inside the valid range (so a stale ?page=12 with a fresh filter
+  // doesn't render an empty table), and slice.
+  const totalItems = filteredAll.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const currentPage = Math.min(requestedPage, totalPages);
+  const filtered = filteredAll.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   function ageFrom(bd: string | null): string {
     if (!bd) return "—";
@@ -128,12 +146,25 @@ export default async function RankingsPage({
     return years.toFixed(1);
   }
 
+  // Filter-bar links: any filter change resets pagination back to page 1
+  // by intentionally NOT carrying the current `page` value forward.
   const buildHref = (updates: Partial<{ fmt: string; pos: string; q: string }>) => {
     const params = new URLSearchParams();
     const next = { fmt, pos, q, ...updates };
     if (next.fmt !== "HALF_PPR") params.set("fmt", next.fmt);
     if (next.pos && next.pos !== "ALL") params.set("pos", next.pos);
     if (next.q) params.set("q", next.q);
+    const s = params.toString();
+    return s ? `/?${s}` : "/";
+  };
+
+  // Pagination links: keep filters, change only the page param.
+  const buildPageHref = (p: number) => {
+    const params = new URLSearchParams();
+    if (fmt !== "HALF_PPR") params.set("fmt", fmt);
+    if (pos && pos !== "ALL") params.set("pos", pos);
+    if (q) params.set("q", q);
+    if (p > 1) params.set("page", String(p));
     const s = params.toString();
     return s ? `/?${s}` : "/";
   };
@@ -296,6 +327,17 @@ export default async function RankingsPage({
             </tbody>
           </table>
         </div>
+      )}
+
+      {totalItems > 0 && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={PAGE_SIZE}
+          buildHref={buildPageHref}
+          itemLabel="players"
+        />
       )}
     </div>
   );

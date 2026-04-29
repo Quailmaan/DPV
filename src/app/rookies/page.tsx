@@ -14,6 +14,9 @@ import {
   roundFromOverallPick,
   rookiePickEquivalent,
 } from "@/lib/rookies/values";
+import { Pagination } from "@/components/Pagination";
+
+const PAGE_SIZE = 25;
 
 // /rookies — current draft class view. Shows prospect consensus rankings
 // pre-draft and overlays draft capital / team / combine / rookie prior DPV
@@ -30,7 +33,12 @@ import {
 
 const INCOMING_CLASS_YEAR = CURRENT_SEASON + 1;
 
-type SearchParams = Promise<{ fmt?: string; pos?: string; sf?: string }>;
+type SearchParams = Promise<{
+  fmt?: string;
+  pos?: string;
+  sf?: string;
+  page?: string;
+}>;
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: "STANDARD", label: "Standard" },
@@ -67,6 +75,7 @@ export default async function RookiesPage({
   // dynasty). When on, the rookie prior re-inflates QB DPV via SF_QB_MULT
   // — so QBs leapfrog skill positions, as they should in SF/2-QB leagues.
   const superflex = sp.sf === "1";
+  const requestedPage = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
   const sb = await createServerClient();
   // Pull all the data we need in parallel:
@@ -435,11 +444,11 @@ export default async function RookiesPage({
   }
 
   // Filter + sort. Drafted rookies float above undrafted via the sort key.
-  const filtered = rows.filter((r) =>
+  const filteredAll = rows.filter((r) =>
     pos === "ALL" ? true : r.position === pos,
   );
 
-  filtered.sort((a, b) => {
+  filteredAll.sort((a, b) => {
     // 1. Drafted with DPV first, sorted by DPV desc.
     if (a.dpv !== null && b.dpv !== null) return b.dpv - a.dpv;
     if (a.dpv !== null) return -1;
@@ -457,6 +466,16 @@ export default async function RookiesPage({
     return a.name.localeCompare(b.name);
   });
 
+  // Pagination — slice 25 rows per page out of the sorted+filtered list.
+  // pickByKey below is computed against the full unfiltered set so a
+  // rookie's pick equivalent stays the same regardless of which page
+  // they're on or which position filter is active.
+  const totalItems = filteredAll.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const currentPage = Math.min(requestedPage, totalPages);
+  const pageOffset = (currentPage - 1) * PAGE_SIZE;
+  const filtered = filteredAll.slice(pageOffset, pageOffset + PAGE_SIZE);
+
   // Rookie-pick equivalent: rank every row in the *full* (unfiltered) list
   // by DPV descending, then compute the pick coordinate per row. Computed
   // off the unfiltered set so a position filter doesn't change the pick
@@ -470,6 +489,8 @@ export default async function RookiesPage({
     pickByKey.set(r.key, rookiePickEquivalent(i + 1, 12));
   });
 
+  // Filter-bar links: any filter change resets pagination back to page 1
+  // by intentionally NOT carrying the current `page` value forward.
   const buildHref = (
     updates: Partial<{ fmt: string; pos: string; sf: string }>,
   ) => {
@@ -483,6 +504,17 @@ export default async function RookiesPage({
     if (next.fmt !== "HALF_PPR") params.set("fmt", next.fmt);
     if (next.pos && next.pos !== "ALL") params.set("pos", next.pos);
     if (next.sf === "1") params.set("sf", "1");
+    const s = params.toString();
+    return s ? `/rookies?${s}` : "/rookies";
+  };
+
+  // Pagination links: keep filters, change only the page param.
+  const buildPageHref = (p: number) => {
+    const params = new URLSearchParams();
+    if (fmt !== "HALF_PPR") params.set("fmt", fmt);
+    if (pos && pos !== "ALL") params.set("pos", pos);
+    if (superflex) params.set("sf", "1");
+    if (p > 1) params.set("page", String(p));
     const s = params.toString();
     return s ? `/rookies?${s}` : "/rookies";
   };
@@ -613,7 +645,7 @@ export default async function RookiesPage({
                   className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                 >
                   <td className="px-3 py-2 text-zinc-400 tabular-nums">
-                    {i + 1}
+                    {pageOffset + i + 1}
                   </td>
                   <td className="px-3 py-2 font-medium">
                     <span className="inline-flex items-center gap-1.5">
@@ -761,6 +793,17 @@ export default async function RookiesPage({
             </tbody>
           </table>
         </div>
+      )}
+
+      {totalItems > 0 && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={PAGE_SIZE}
+          buildHref={buildPageHref}
+          itemLabel="rookies"
+        />
       )}
     </div>
   );
