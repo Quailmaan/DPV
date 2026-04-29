@@ -151,10 +151,11 @@ export async function generateTradeNarrative(
     return null;
   }
 
-  // Default to a stable Haiku alias that always resolves to a current
-  // production model. Set ANTHROPIC_MODEL to override (e.g. when a newer
-  // Haiku ships).
-  const model = process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-latest";
+  // Default to the current production Haiku. Anthropic retired the
+  // `-latest` aliases for the 3.5 line; the post-deprecation generation
+  // uses bare semver IDs (claude-haiku-4-5). Override via ANTHROPIC_MODEL
+  // when a newer Haiku ships.
+  const model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
   const client = new Anthropic({ apiKey });
 
   const payload = buildPayload(result);
