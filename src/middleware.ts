@@ -26,6 +26,10 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC_PREFIXES = [
   "/login",
   "/signup",
+  // Password recovery is by definition a logged-out flow — gating it
+  // behind auth would make the link in the reset email useless.
+  "/forgot-password",
+  "/reset-password",
   "/auth",
   "/api/cron",
   "/api/stripe/webhook",
