@@ -23,6 +23,13 @@ import TradeCalculator, {
   type TradePlayer,
   type LeagueRosterOption,
 } from "./TradeCalculator";
+import MultiTradeAnalyzer from "./MultiTradeAnalyzer";
+import {
+  listMyLeaguesForAnalyzer,
+  loadAnalyzerLeague,
+  type AnalyzerLeagueData,
+  type LeagueOption,
+} from "./multiTradeActions";
 
 // Same name normalization as /rookies — used to detect when a synthetic
 // rookie entry duplicates a real DPV snapshot (post-publish). Once
@@ -46,6 +53,10 @@ type SearchParams = Promise<{
   to?: string;
   give?: string;
   receive?: string;
+  // Tool switcher: "calc" (default; existing 1-on-1 calculator) or
+  // "multi" (Pro-gated multi-team trade analyzer that uses the user's
+  // synced league rosters).
+  tool?: string;
 }>;
 
 function isScoringFormat(v: string | undefined): v is ScoringFormat {
@@ -78,6 +89,45 @@ export default async function TradePage({
   const tierState = await getCurrentTier();
   const isPro = tierState.tier === "pro";
   const requestedLeague = isPro ? sp.league ?? null : null;
+  const tool = sp.tool === "multi" ? "multi" : "calc";
+
+  // Multi-team analyzer plumbing — load the synced league list (cheap)
+  // and, if a league is selected with tool=multi, the full analyzer
+  // payload (rosters + picks + scaled market). Both calls short-circuit
+  // for free users inside the action so there's no leaked work.
+  let myLeagues: LeagueOption[] = [];
+  let analyzerData: AnalyzerLeagueData | null = null;
+  if (tool === "multi") {
+    myLeagues = await listMyLeaguesForAnalyzer();
+    if (isPro && requestedLeague) {
+      const res = await loadAnalyzerLeague(requestedLeague);
+      if (!("error" in res)) analyzerData = res;
+    }
+
+    // Short-circuit: the multi-team analyzer doesn't need the calculator's
+    // heavy DPV/market/rookies/picks load. Render the page shell with
+    // just the tab switcher and the analyzer body.
+    return (
+      <div>
+        <div className="mb-4">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Multi-Team Trade Analyzer
+          </h1>
+          <p className="text-sm text-zinc-500 mt-1">
+            Build a 2-, 3-, or up-to-6-team trade from your synced league.
+            Each side gets a PYV/market blend verdict with sell-window
+            flags.
+          </p>
+        </div>
+        <ToolTabs tool="multi" requestedLeague={requestedLeague} fmt={sp.fmt} />
+        <MultiTradeAnalyzer
+          isPro={isPro}
+          myLeagues={myLeagues}
+          leagueData={analyzerData}
+        />
+      </div>
+    );
+  }
 
   const sb = await createServerClient();
 
@@ -408,7 +458,7 @@ export default async function TradePage({
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-4">
         <h1 className="text-2xl font-semibold tracking-tight">
           Trade Calculator
         </h1>
@@ -424,22 +474,26 @@ export default async function TradePage({
             </span>
           )}
         </p>
-        {!isPro && (
-          <div className="mt-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-              Pro:
-            </span>{" "}
-            League-aware mode (per-team rosters + traded picks) and Buy/Sell
-            market signals.{" "}
-            <Link
-              href="/pricing"
-              className="font-medium text-emerald-700 dark:text-emerald-400 hover:underline"
-            >
-              Upgrade →
-            </Link>
-          </div>
-        )}
       </div>
+
+      <ToolTabs tool="calc" requestedLeague={requestedLeague} fmt={sp.fmt} />
+
+      {!isPro && (
+        <div className="mb-4 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">
+            Pro:
+          </span>{" "}
+          League-aware mode (per-team rosters + traded picks) and Buy/Sell
+          market signals.{" "}
+          <Link
+            href="/pricing"
+            className="font-medium text-emerald-700 dark:text-emerald-400 hover:underline"
+          >
+            Upgrade →
+          </Link>
+        </div>
+      )}
+
       <TradeCalculator
         players={players}
         fmt={fmt}
@@ -456,6 +510,59 @@ export default async function TradePage({
           isDefault: isDefaultConstruction,
         }}
       />
+    </div>
+  );
+}
+
+// ---- Tool switcher --------------------------------------------------------
+//
+// Server component — preserves the rest of the URL state when switching
+// tabs (selected league, scoring format) so the user doesn't lose context
+// flipping between tools.
+
+function ToolTabs({
+  tool,
+  requestedLeague,
+  fmt,
+}: {
+  tool: "calc" | "multi";
+  requestedLeague: string | null;
+  fmt: string | undefined;
+}) {
+  function href(target: "calc" | "multi"): string {
+    const p = new URLSearchParams();
+    p.set("tool", target);
+    if (requestedLeague) p.set("league", requestedLeague);
+    if (fmt) p.set("fmt", fmt);
+    return `/trade?${p.toString()}`;
+  }
+  return (
+    <div className="mb-5 flex flex-wrap gap-1 border-b border-zinc-200 dark:border-zinc-800">
+      <Link
+        href={href("calc")}
+        className={
+          "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors " +
+          (tool === "calc"
+            ? "border-emerald-500 text-zinc-900 dark:text-zinc-100"
+            : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200")
+        }
+      >
+        Calculator
+      </Link>
+      <Link
+        href={href("multi")}
+        className={
+          "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors " +
+          (tool === "multi"
+            ? "border-emerald-500 text-zinc-900 dark:text-zinc-100"
+            : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200")
+        }
+      >
+        Multi-Team Analyzer
+        <span className="ml-1.5 inline-block rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide">
+          Pro
+        </span>
+      </Link>
     </div>
   );
 }
