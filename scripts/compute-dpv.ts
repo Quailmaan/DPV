@@ -894,10 +894,14 @@ async function main() {
   console.log(`  wrote ${combined.length} snapshots`);
 
   // Append today's values to dpv_history. Source of truth for the
-  // trajectory indicator (30-day, 6-month value change %) and the
-  // sell-window score downstream. Upserting on (player_id, scoring_format,
-  // snapshot_date) makes the same-day rerun idempotent — values from the
-  // last run of the day are what end up persisted.
+  // trajectory indicator (30-day, 6-month value change %), the
+  // sell-window score, and the per-player trend chart. The full
+  // breakdown rides along so the chart can attribute moves to
+  // sub-scores (opportunity ↑, age ↓, etc.) — without it the chart
+  // can still render the line, just not the "what changed" notes.
+  // Upserting on (player_id, scoring_format, snapshot_date) makes the
+  // same-day rerun idempotent — values from the last run of the day
+  // are what end up persisted.
   const snapshotDate = TODAY.toISOString().slice(0, 10);
   console.log(`Writing dpv_history for ${snapshotDate}...`);
   const historyRows = combined.map((c) => ({
@@ -905,6 +909,7 @@ async function main() {
     scoring_format: c.scoring_format,
     snapshot_date: snapshotDate,
     dpv: c.dpv,
+    breakdown: c.breakdown,
   }));
   for (let i = 0; i < historyRows.length; i += BATCH) {
     const chunk = historyRows.slice(i, i + BATCH);

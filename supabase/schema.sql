@@ -90,8 +90,21 @@ create table if not exists public.dpv_history (
   scoring_format text not null check (scoring_format in ('STANDARD','HALF_PPR','FULL_PPR')),
   snapshot_date date not null,
   dpv int not null,
+  -- Full DPVBreakdown persisted alongside the final number so the
+  -- per-player trend chart can attribute week-over-week DPV moves to
+  -- the underlying inputs (opportunity ↑, age ↓, etc.). Nullable
+  -- because rows written before this column was added have no
+  -- breakdown — the "what changed" UI degrades gracefully when it's
+  -- missing.
+  breakdown jsonb,
   primary key (player_id, scoring_format, snapshot_date)
 );
+
+-- Idempotent column add for existing deploys: re-running schema.sql
+-- against a database that already has dpv_history (without the
+-- breakdown column) backfills it as nullable.
+alter table public.dpv_history
+  add column if not exists breakdown jsonb;
 
 -- Trajectory queries hit (player_id, scoring_format) and walk back in
 -- time, so the index leads with those and orders by date desc.

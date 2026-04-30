@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ScoringFormat } from "./types";
+import type { DPVBreakdown, ScoringFormat } from "./types";
 
 // DPV trajectory derived from dpv_history. Used by the sell-window
 // indicator (Phase 2 of the value-trend feature set) and by the future
@@ -101,6 +101,64 @@ export async function loadHistoryForPlayers(
     }
   }
   return out;
+}
+
+// Pull the snapshot from N days ago WITH its full breakdown. Used by
+// the per-player trend chart's "what changed" panel — we don't need
+// the breakdown for every history row (the chart line uses only the
+// dpv field), just for the two endpoints of the comparison.
+//
+// Returns null if no row is within the tolerance window of the target
+// date OR if the row pre-dates the breakdown column being added (in
+// which case breakdown is null in the database). Callers should
+// degrade gracefully — `compareBreakdowns` already handles the null
+// breakdown case.
+export async function loadHistoricalBreakdown(
+  sb: SupabaseClient,
+  playerId: string,
+  scoringFormat: ScoringFormat,
+  daysAgo: number,
+  toleranceDays: number = SNAPSHOT_TOLERANCE_DAYS,
+): Promise<{
+  date: string;
+  dpv: number;
+  breakdown: DPVBreakdown | null;
+} | null> {
+  const target = daysAgoIso(new Date(), daysAgo);
+  // Pull a small window around the target — usually 1-2 rows back.
+  // Postgres can return rows in either direction so we order by date
+  // descending and walk the result for the nearest match.
+  const { data, error } = await sb
+    .from("dpv_history")
+    .select("snapshot_date, dpv, breakdown")
+    .eq("player_id", playerId)
+    .eq("scoring_format", scoringFormat)
+    .order("snapshot_date", { ascending: false });
+  if (error || !data || data.length === 0) return null;
+
+  let best: {
+    snapshot_date: string;
+    dpv: number;
+    breakdown: DPVBreakdown | null;
+  } | null = null;
+  let bestDist = Infinity;
+  for (const row of data as Array<{
+    snapshot_date: string;
+    dpv: number;
+    breakdown: DPVBreakdown | null;
+  }>) {
+    const dist = daysBetween(row.snapshot_date, target);
+    if (dist < bestDist) {
+      best = row;
+      bestDist = dist;
+    }
+  }
+  if (!best || bestDist > toleranceDays) return null;
+  return {
+    date: best.snapshot_date,
+    dpv: best.dpv,
+    breakdown: best.breakdown,
+  };
 }
 
 // Find the snapshot closest to `targetDateIso` within the tolerance

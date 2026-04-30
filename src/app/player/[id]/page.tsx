@@ -14,6 +14,12 @@ import {
 } from "@/lib/dpv/sellWindow";
 import SellWindowBadge from "@/components/SellWindowBadge";
 import { getCurrentTier } from "@/lib/billing/tier";
+import {
+  loadHistoryForPlayer,
+  loadHistoricalBreakdown,
+} from "@/lib/dpv/trajectory";
+import { compareBreakdowns } from "@/lib/dpv/whatChanged";
+import PyvTrendChart, { type TrendPoint } from "@/components/PyvTrendChart";
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: "STANDARD", label: "Standard" },
@@ -152,40 +158,56 @@ export default async function PlayerPage({
 
   const sb = await createServerClient();
 
-  const [playerRes, seasonsRes, snapshotRes, marketRes, hsmRes, combineRes] =
-    await Promise.all([
-      sb.from("players").select("*").eq("player_id", id).maybeSingle(),
-      sb
-        .from("player_seasons")
-        .select("*")
-        .eq("player_id", id)
-        .order("season", { ascending: false }),
-      sb
-        .from("dpv_snapshots")
-        .select("*")
-        .eq("player_id", id)
-        .eq("scoring_format", fmt)
-        .maybeSingle(),
-      sb
-        .from("market_values")
-        .select("market_value_normalized, position_rank, overall_rank")
-        .eq("player_id", id)
-        .eq("scoring_format", fmt)
-        .eq("source", "fantasycalc")
-        .maybeSingle(),
-      sb
-        .from("hsm_comps")
-        .select("comps, summary")
-        .eq("player_id", id)
-        .maybeSingle(),
-      sb
-        .from("combine_stats")
-        .select(
-          "combine_season, height_in, weight_lb, forty, bench, vertical, broad_jump, cone, shuttle, athleticism_score, metrics_count",
-        )
-        .eq("player_id", id)
-        .maybeSingle(),
-    ]);
+  const [
+    playerRes,
+    seasonsRes,
+    snapshotRes,
+    marketRes,
+    hsmRes,
+    combineRes,
+    historyPoints,
+    historyComparePoint,
+  ] = await Promise.all([
+    sb.from("players").select("*").eq("player_id", id).maybeSingle(),
+    sb
+      .from("player_seasons")
+      .select("*")
+      .eq("player_id", id)
+      .order("season", { ascending: false }),
+    sb
+      .from("dpv_snapshots")
+      .select("*")
+      .eq("player_id", id)
+      .eq("scoring_format", fmt)
+      .maybeSingle(),
+    sb
+      .from("market_values")
+      .select("market_value_normalized, position_rank, overall_rank")
+      .eq("player_id", id)
+      .eq("scoring_format", fmt)
+      .eq("source", "fantasycalc")
+      .maybeSingle(),
+    sb
+      .from("hsm_comps")
+      .select("comps, summary")
+      .eq("player_id", id)
+      .maybeSingle(),
+    sb
+      .from("combine_stats")
+      .select(
+        "combine_season, height_in, weight_lb, forty, bench, vertical, broad_jump, cone, shuttle, athleticism_score, metrics_count",
+      )
+      .eq("player_id", id)
+      .maybeSingle(),
+    // Trend chart data: full descending-by-date series. We only need
+    // (date, dpv) here; the breakdown is fetched separately for the
+    // single comparison endpoint to avoid hauling N×~1KB JSON.
+    loadHistoryForPlayer(sb, id, fmt),
+    // What-changed comparison: closest snapshot to ~30 days ago that
+    // has a breakdown. Returns null until at least one historical row
+    // has been written with the breakdown column populated.
+    loadHistoricalBreakdown(sb, id, fmt, 30),
+  ]);
 
   if (playerRes.error || !playerRes.data) return notFound();
 
@@ -266,6 +288,33 @@ export default async function PlayerPage({
   const marketValue =
     market?.market_value_normalized !== null && market?.market_value_normalized !== undefined
       ? Math.round(Number(market.market_value_normalized))
+      : null;
+
+  // Trend chart series: convert the descending history into ascending
+  // for plotting, and drop to (date, dpv) only — the chart line uses
+  // nothing else.
+  const trendPoints: TrendPoint[] = [...historyPoints]
+    .reverse()
+    .map((p) => ({ date: p.snapshotDate, dpv: p.dpv }));
+
+  // "What changed" comparison: only meaningful for veterans where the
+  // current snapshot has a real DPVBreakdown. Rookies have a different
+  // breakdown shape and tend to swing for unrelated reasons (combine
+  // data landing, draft capital changing) — we hide the panel for them.
+  const whatChanged =
+    breakdown && historyComparePoint && trendPoints.length > 0
+      ? compareBreakdowns({
+          older: {
+            date: historyComparePoint.date,
+            dpv: historyComparePoint.dpv,
+            breakdown: historyComparePoint.breakdown,
+          },
+          newer: {
+            date: trendPoints[trendPoints.length - 1].date,
+            dpv: trendPoints[trendPoints.length - 1].dpv,
+            breakdown,
+          },
+        })
       : null;
 
   // Position-wide DPV + market fetch (used for position rank, market delta,
@@ -535,6 +584,90 @@ export default async function PlayerPage({
           </div>
         </div>
       </div>
+
+      {/* PYV trend chart + what changed (free for everyone). The chart
+          slots between the stat cards and the breakdown table so the
+          reading flow is: number → how it moved → why it's that number
+          right now. We hide the entire section for rookies — their
+          prior shape is different and the deltas don't carry the same
+          meaning. */}
+      {!isRookiePrior && (
+        <div className="mb-8 grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
+          <PyvTrendChart
+            points={trendPoints}
+            positionLabel={player.position}
+          />
+          <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <div className="text-sm font-medium mb-2">What changed</div>
+            {whatChanged === null ? (
+              <p className="text-xs text-zinc-500">
+                Not enough history yet to attribute moves. Notes appear
+                once we have ~30 days of snapshots with full breakdowns.
+              </p>
+            ) : whatChanged.attributionUnavailable ? (
+              <div className="text-xs text-zinc-500 space-y-1">
+                <div>
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                    PYV{" "}
+                    {whatChanged.net.absolute > 0 ? "+" : ""}
+                    {whatChanged.net.absolute}
+                  </span>{" "}
+                  ({whatChanged.net.pct > 0 ? "+" : ""}
+                  {whatChanged.net.pct}%) over the last {whatChanged.spanDays}{" "}
+                  day{whatChanged.spanDays === 1 ? "" : "s"}.
+                </div>
+                <div>
+                  Per-input attribution starts populating once both endpoints
+                  carry a stored breakdown.
+                </div>
+              </div>
+            ) : whatChanged.notes.length === 0 ? (
+              <p className="text-xs text-zinc-500">
+                PYV {whatChanged.net.absolute > 0 ? "+" : ""}
+                {whatChanged.net.absolute} ({whatChanged.net.pct > 0 ? "+" : ""}
+                {whatChanged.net.pct}%) over the last {whatChanged.spanDays}{" "}
+                day{whatChanged.spanDays === 1 ? "" : "s"} — no single input
+                moved enough to call out.
+              </p>
+            ) : (
+              <ul className="space-y-2 text-xs">
+                <li className="text-zinc-500 pb-2 border-b border-zinc-100 dark:border-zinc-800">
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                    PYV {whatChanged.net.absolute > 0 ? "+" : ""}
+                    {whatChanged.net.absolute}
+                  </span>{" "}
+                  ({whatChanged.net.pct > 0 ? "+" : ""}
+                  {whatChanged.net.pct}%) over {whatChanged.spanDays} day
+                  {whatChanged.spanDays === 1 ? "" : "s"}
+                </li>
+                {whatChanged.notes.map((n) => (
+                  <li
+                    key={n.headline}
+                    className="flex items-start gap-2"
+                  >
+                    <span
+                      className={`inline-block mt-1 h-1.5 w-1.5 rounded-full flex-shrink-0 ${
+                        n.direction === "up"
+                          ? "bg-emerald-500"
+                          : n.direction === "down"
+                          ? "bg-red-500"
+                          : "bg-zinc-400"
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                        {n.headline}
+                      </span>
+                      <span className="text-zinc-500"> · {n.detail}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {priorBreakdown && (
         <div className="mb-8">
