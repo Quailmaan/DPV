@@ -191,7 +191,7 @@ export default async function RankingsPage({
               className={`px-3 py-1.5 ${
                 fmt === f.key
                   ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
               }`}
             >
               {f.label}
@@ -206,7 +206,7 @@ export default async function RankingsPage({
               className={`px-3 py-1.5 ${
                 pos === p
                   ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
               }`}
             >
               {p}
@@ -234,19 +234,22 @@ export default async function RankingsPage({
           </span>
         </div>
       ) : (
+        // On phones we collapse to the 3 essentials: rank, player, PYV.
+        // Pos + Tier come back at sm; Team/Age at md; Market/Δ at lg.
+        // `min-w-` only kicks in at lg+ where every column is visible.
         <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          <table className="w-full text-sm min-w-[640px]">
+          <table className="w-full text-sm lg:min-w-[640px]">
             <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
               <tr>
-                <th className="px-4 py-2 text-left w-16">#</th>
-                <th className="px-4 py-2 text-left">Player</th>
-                <th className="px-4 py-2 text-left w-16">Pos</th>
-                <th className="px-4 py-2 text-left w-20">Team</th>
-                <th className="px-4 py-2 text-right w-16">Age</th>
-                <th className="px-4 py-2 text-right w-24">PYV</th>
-                <th className="px-4 py-2 text-right w-24">Market</th>
-                <th className="px-4 py-2 text-right w-20">Δ</th>
-                <th className="px-4 py-2 text-left w-36">Tier</th>
+                <th className="px-3 sm:px-4 py-2 text-left w-12 sm:w-16">#</th>
+                <th className="px-3 sm:px-4 py-2 text-left">Player</th>
+                <th className="hidden sm:table-cell px-4 py-2 text-left w-16">Pos</th>
+                <th className="hidden md:table-cell px-4 py-2 text-left w-20">Team</th>
+                <th className="hidden md:table-cell px-4 py-2 text-right w-16">Age</th>
+                <th className="px-3 sm:px-4 py-2 text-right w-16 sm:w-24">PYV</th>
+                <th className="hidden lg:table-cell px-4 py-2 text-right w-24">Market</th>
+                <th className="hidden lg:table-cell px-4 py-2 text-right w-20">Δ</th>
+                <th className="hidden sm:table-cell px-4 py-2 text-left w-36">Tier</th>
               </tr>
             </thead>
             <tbody>
@@ -262,40 +265,49 @@ export default async function RankingsPage({
                 return (
                   <tr
                     key={r.player_id}
-                    className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                    className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 active:bg-zinc-100 dark:active:bg-zinc-800"
                   >
-                    <td className="px-4 py-2 text-zinc-400 tabular-nums">
+                    <td className="px-3 sm:px-4 py-2 text-zinc-400 tabular-nums">
                       {posRank !== undefined
                         ? `${r.players!.position}${posRank}`
                         : "—"}
                     </td>
-                    <td className="px-4 py-2 font-medium">
+                    <td className="px-3 sm:px-4 py-2 font-medium">
                       <Link
                         href={`/player/${r.player_id}?fmt=${fmt}`}
                         className="hover:underline"
                       >
                         {r.players!.name}
                       </Link>
+                      {/* On phones the Pos/Team columns are hidden; show
+                          a compact "POS · TEAM" line under the name so
+                          the row is still self-explanatory. */}
+                      <div className="sm:hidden text-xs text-zinc-500 mt-0.5">
+                        {r.players!.position}
+                        {r.players!.current_team
+                          ? ` · ${r.players!.current_team}`
+                          : ""}
+                      </div>
                     </td>
-                    <td className="px-4 py-2">
+                    <td className="hidden sm:table-cell px-4 py-2">
                       <span className="inline-block rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
                         {r.players!.position}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-zinc-500">
+                    <td className="hidden md:table-cell px-4 py-2 text-zinc-500">
                       {r.players!.current_team ?? "—"}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums">
+                    <td className="hidden md:table-cell px-4 py-2 text-right tabular-nums">
                       {ageFrom(r.players!.birthdate)}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums font-semibold">
+                    <td className="px-3 sm:px-4 py-2 text-right tabular-nums font-semibold">
                       {r.dpv}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-zinc-500">
+                    <td className="hidden lg:table-cell px-4 py-2 text-right tabular-nums text-zinc-500">
                       {market !== undefined ? Math.round(market) : "—"}
                     </td>
                     <td
-                      className={`px-4 py-2 text-right tabular-nums ${
+                      className={`hidden lg:table-cell px-4 py-2 text-right tabular-nums ${
                         delta === null
                           ? "text-zinc-400"
                           : delta > 0
@@ -320,7 +332,7 @@ export default async function RankingsPage({
                         ? `+${delta}`
                         : `${delta}`}
                     </td>
-                    <td className="px-4 py-2 text-zinc-500">{r.tier}</td>
+                    <td className="hidden sm:table-cell px-4 py-2 text-zinc-500">{r.tier}</td>
                   </tr>
                 );
               })}
@@ -374,7 +386,7 @@ function MarketingHero() {
             </Link>
             <Link
               href="/pricing"
-              className="inline-block text-sm font-medium px-4 py-2 rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="inline-block text-sm font-medium px-4 py-2 rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
             >
               See Pro features — $7/mo
             </Link>

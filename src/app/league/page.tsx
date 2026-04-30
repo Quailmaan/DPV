@@ -126,14 +126,14 @@ export default async function LeaguesPage() {
         <>
           <h2 className="text-sm font-semibold mb-3">Synced leagues</h2>
           <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          <table className="w-full text-sm min-w-[640px]">
+          <table className="w-full text-sm md:min-w-[640px]">
             <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
               <tr>
                 <th className="px-4 py-2 text-left">League</th>
-                <th className="px-4 py-2 text-left">Season</th>
-                <th className="px-4 py-2 text-left">Format</th>
-                <th className="px-4 py-2 text-right">Teams</th>
-                <th className="px-4 py-2 text-right">Last Sync</th>
+                <th className="hidden sm:table-cell px-4 py-2 text-left">Season</th>
+                <th className="hidden md:table-cell px-4 py-2 text-left">Format</th>
+                <th className="hidden md:table-cell px-4 py-2 text-right">Teams</th>
+                <th className="hidden sm:table-cell px-4 py-2 text-right">Last Sync</th>
                 <th className="px-4 py-2 text-right" />
               </tr>
             </thead>
@@ -141,7 +141,7 @@ export default async function LeaguesPage() {
               {leagues.map((l) => (
                 <tr
                   key={l.league_id}
-                  className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                  className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 active:bg-zinc-100 dark:active:bg-zinc-800"
                 >
                   <td className="px-4 py-2 font-medium">
                     <Link
@@ -153,21 +153,33 @@ export default async function LeaguesPage() {
                     {l.roster_id === null && (
                       <Link
                         href={`/league/${l.league_id}?pick=1`}
-                        className="ml-2 text-[11px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+                        className="ml-2 text-[11px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 hover:bg-emerald-200 active:bg-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/60 dark:active:bg-emerald-900/80"
                       >
                         Pick team
                       </Link>
                     )}
+                    {/* Phone-only summary line: format · season · last sync.
+                        These columns are hidden at this width. */}
+                    <div className="sm:hidden text-xs text-zinc-500 mt-0.5">
+                      {[
+                        l.scoring_format,
+                        String(l.season),
+                        `${l.total_rosters}-team`,
+                        formatRelative(l.synced_at),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
                   </td>
-                  <td className="px-4 py-2 text-zinc-500">{l.season}</td>
-                  <td className="px-4 py-2 text-zinc-500">
+                  <td className="hidden sm:table-cell px-4 py-2 text-zinc-500">{l.season}</td>
+                  <td className="hidden md:table-cell px-4 py-2 text-zinc-500">
                     {l.scoring_format}
                   </td>
-                  <td className="px-4 py-2 text-right tabular-nums">
+                  <td className="hidden md:table-cell px-4 py-2 text-right tabular-nums">
                     {l.total_rosters}
                   </td>
                   <td
-                    className="px-4 py-2 text-right text-zinc-500 tabular-nums"
+                    className="hidden sm:table-cell px-4 py-2 text-right text-zinc-500 tabular-nums"
                     title={new Date(l.synced_at).toLocaleString()}
                   >
                     {formatRelative(l.synced_at)}

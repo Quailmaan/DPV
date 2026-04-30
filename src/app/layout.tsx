@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import Image from "next/image";
 import Link from "next/link";
 import HeaderAuth from "@/components/HeaderAuth";
+import MobileNav from "@/components/MobileNav";
 import { PylonWordmark } from "@/components/PylonLogo";
 import { SUPPORT_EMAIL, mailtoHref } from "@/lib/site/contact";
 import "./globals.css";
@@ -87,10 +88,11 @@ export default async function RootLayout({
                   />
                   <PylonWordmark size="md" />
                 </Link>
-                {/* Nav scrolls horizontally if it overflows on narrow phones rather
-                    than wrapping below the brand. -mx keeps the scroll edge flush
-                    with the screen edge so swipe affordance is clearer. */}
-                <nav className="flex gap-4 sm:gap-5 text-sm text-zinc-600 dark:text-zinc-400 overflow-x-auto whitespace-nowrap -mx-3 px-3 sm:mx-0 sm:px-0 order-3 sm:order-2 basis-full sm:basis-auto">
+                {/* Desktop nav: inline horizontal links. Hidden on phones,
+                    where MobileNav (below) renders a hamburger sheet
+                    instead — way easier to scan + tap than a 6-link
+                    side-scroller jammed under the logo. */}
+                <nav className="hidden sm:flex gap-4 sm:gap-5 text-sm text-zinc-600 dark:text-zinc-400 whitespace-nowrap order-2">
                   <Link
                     href="/"
                     className="hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -128,8 +130,9 @@ export default async function RootLayout({
                     Pricing
                   </Link>
                 </nav>
-                <div className="order-2 sm:order-3 ml-auto">
+                <div className="order-3 ml-auto flex items-center gap-2">
                   <HeaderAuth />
+                  <MobileNav />
                 </div>
               </div>
             </header>

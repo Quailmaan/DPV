@@ -521,18 +521,21 @@ export default async function LeagueDetailPage({
         <h2 className="text-sm font-semibold">Power Rankings</h2>
         {isPro && <CsvLink href={`/api/league/${id}/export/rankings`} />}
       </div>
+      {/* Power rankings: # / Team / Total / Verdict are essentials at
+          every width. Per-position strengths come back at sm; Top Player
+          column at lg. The Report → link is always visible. */}
       <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 mb-8">
-        <table className="w-full text-sm min-w-[680px]">
+        <table className="w-full text-sm lg:min-w-[680px]">
           <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
             <tr>
               <th className="px-3 py-2 text-left w-10">#</th>
               <th className="px-3 py-2 text-left">Team</th>
               <th className="px-3 py-2 text-right">Total PYV</th>
-              <th className="px-3 py-2 text-right">QB</th>
-              <th className="px-3 py-2 text-right">RB</th>
-              <th className="px-3 py-2 text-right">WR</th>
-              <th className="px-3 py-2 text-right">TE</th>
-              <th className="px-3 py-2 text-left">Top Player</th>
+              <th className="hidden sm:table-cell px-3 py-2 text-right">QB</th>
+              <th className="hidden sm:table-cell px-3 py-2 text-right">RB</th>
+              <th className="hidden sm:table-cell px-3 py-2 text-right">WR</th>
+              <th className="hidden sm:table-cell px-3 py-2 text-right">TE</th>
+              <th className="hidden lg:table-cell px-3 py-2 text-left">Top Player</th>
               <th className="px-3 py-2 text-left">Verdict</th>
               <th className="px-3 py-2" />
             </tr>
@@ -553,7 +556,7 @@ export default async function LeagueDetailPage({
                     : "text-zinc-500";
                 return (
                   <td
-                    className={`px-3 py-2 text-right tabular-nums ${cls}`}
+                    className={`hidden sm:table-cell px-3 py-2 text-right tabular-nums ${cls}`}
                     title={`${Math.round(val)} (league avg ${Math.round(avg)})`}
                   >
                     {Math.round(val)}
@@ -567,7 +570,7 @@ export default async function LeagueDetailPage({
                   className={`border-t border-zinc-100 dark:border-zinc-800 ${
                     isFocus
                       ? "bg-amber-50/50 dark:bg-amber-950/20"
-                      : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                      : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50 active:bg-zinc-100 dark:active:bg-zinc-800"
                   }`}
                 >
                   <td className="px-3 py-2 text-zinc-400 tabular-nums">
@@ -593,7 +596,7 @@ export default async function LeagueDetailPage({
                   {strengthCell("RB", s.byPos.RB)}
                   {strengthCell("WR", s.byPos.WR)}
                   {strengthCell("TE", s.byPos.TE)}
-                  <td className="px-3 py-2 text-zinc-500">
+                  <td className="hidden lg:table-cell px-3 py-2 text-zinc-500">
                     {s.topPlayerName ?? "—"}
                     {s.topPlayerDpv > 0 && (
                       <span className="text-xs ml-2 tabular-nums">
@@ -652,17 +655,19 @@ export default async function LeagueDetailPage({
               />
             )}
           </div>
+          {/* Focused-team roster: Player + PYV are essentials. Pos comes
+              back at sm; Age + Window at md; Team + Tier at lg. */}
           <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-            <table className="w-full text-sm min-w-[640px]">
+            <table className="w-full text-sm lg:min-w-[640px]">
               <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
                 <tr>
                   <th className="px-3 py-2 text-left">Player</th>
-                  <th className="px-3 py-2 text-left">Pos</th>
-                  <th className="px-3 py-2 text-left">Team</th>
-                  <th className="px-3 py-2 text-right">Age</th>
+                  <th className="hidden sm:table-cell px-3 py-2 text-left">Pos</th>
+                  <th className="hidden lg:table-cell px-3 py-2 text-left">Team</th>
+                  <th className="hidden md:table-cell px-3 py-2 text-right">Age</th>
                   <th className="px-3 py-2 text-right">PYV</th>
-                  <th className="px-3 py-2 text-left">Tier</th>
-                  <th className="px-3 py-2 text-left">Window</th>
+                  <th className="hidden lg:table-cell px-3 py-2 text-left">Tier</th>
+                  <th className="hidden md:table-cell px-3 py-2 text-left">Window</th>
                 </tr>
               </thead>
               <tbody>
@@ -685,23 +690,30 @@ export default async function LeagueDetailPage({
                           >
                             {s.players!.name}
                           </Link>
+                          {/* Phone-only summary line — Pos + Team + Tier
+                              are hidden columns at this width. */}
+                          <div className="sm:hidden text-xs text-zinc-500 mt-0.5">
+                            {[pos, s.players!.current_team, s.tier]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="hidden sm:table-cell px-3 py-2">
                           <span className="inline-block rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
                             {pos}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-zinc-500">
+                        <td className="hidden lg:table-cell px-3 py-2 text-zinc-500">
                           {s.players!.current_team ?? "—"}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
+                        <td className="hidden md:table-cell px-3 py-2 text-right tabular-nums">
                           {ageFrom(s.players!.birthdate)}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums font-semibold">
                           {s.dpv}
                         </td>
-                        <td className="px-3 py-2 text-zinc-500">{s.tier}</td>
-                        <td className="px-3 py-2">
+                        <td className="hidden lg:table-cell px-3 py-2 text-zinc-500">{s.tier}</td>
+                        <td className="hidden md:table-cell px-3 py-2">
                           {sw ? (
                             <SellWindowBadge sw={sw} isPro={isPro} size="xs" />
                           ) : (
@@ -785,23 +797,24 @@ export default async function LeagueDetailPage({
           })}
         </div>
       </div>
+      {/* Free agents table — same column priority as the team roster. */}
       <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-        <table className="w-full text-sm min-w-[640px]">
+        <table className="w-full text-sm lg:min-w-[640px]">
           <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
             <tr>
               <th className="px-3 py-2 text-left">Player</th>
-              <th className="px-3 py-2 text-left">Pos</th>
-              <th className="px-3 py-2 text-left">Team</th>
-              <th className="px-3 py-2 text-right">Age</th>
+              <th className="hidden sm:table-cell px-3 py-2 text-left">Pos</th>
+              <th className="hidden lg:table-cell px-3 py-2 text-left">Team</th>
+              <th className="hidden md:table-cell px-3 py-2 text-right">Age</th>
               <th className="px-3 py-2 text-right">PYV</th>
-              <th className="px-3 py-2 text-left">Tier</th>
+              <th className="hidden sm:table-cell px-3 py-2 text-left">Tier</th>
             </tr>
           </thead>
           <tbody>
             {filteredFAs.slice(0, 50).map((fa) => (
               <tr
                 key={fa.player_id}
-                className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 active:bg-zinc-100 dark:active:bg-zinc-800"
               >
                 <td className="px-3 py-2 font-medium">
                   <Link
@@ -810,22 +823,31 @@ export default async function LeagueDetailPage({
                   >
                     {fa.players!.name}
                   </Link>
+                  <div className="sm:hidden text-xs text-zinc-500 mt-0.5">
+                    {[
+                      fa.players!.position,
+                      fa.players!.current_team,
+                      fa.tier,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
                 </td>
-                <td className="px-3 py-2">
+                <td className="hidden sm:table-cell px-3 py-2">
                   <span className="inline-block rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
                     {fa.players!.position}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-zinc-500">
+                <td className="hidden lg:table-cell px-3 py-2 text-zinc-500">
                   {fa.players!.current_team ?? "—"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="hidden md:table-cell px-3 py-2 text-right tabular-nums">
                   {ageFrom(fa.players!.birthdate)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums font-semibold">
                   {fa.dpv}
                 </td>
-                <td className="px-3 py-2 text-zinc-500">{fa.tier}</td>
+                <td className="hidden sm:table-cell px-3 py-2 text-zinc-500">{fa.tier}</td>
               </tr>
             ))}
           </tbody>

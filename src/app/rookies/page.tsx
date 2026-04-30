@@ -555,7 +555,7 @@ export default async function RookiesPage({
               className={`px-3 py-1.5 ${
                 fmt === f.key
                   ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
               }`}
             >
               {f.label}
@@ -570,7 +570,7 @@ export default async function RookiesPage({
               className={`px-3 py-1.5 ${
                 pos === p
                   ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
               }`}
             >
               {p}
@@ -587,7 +587,7 @@ export default async function RookiesPage({
             className={`px-3 py-1.5 ${
               !superflex
                 ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                : "hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
             }`}
           >
             1-QB
@@ -598,7 +598,7 @@ export default async function RookiesPage({
             className={`px-3 py-1.5 ${
               superflex
                 ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                : "hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
             }`}
           >
             Superflex
@@ -613,27 +613,32 @@ export default async function RookiesPage({
           attaches pick data.
         </div>
       ) : (
+        // Rookies table is data-dense — 12 columns at full width. On
+        // phones we collapse hard to: #, Player (with Pos·Team
+        // inlined), PYV, Pick. Grade/RAS/40/Mkt/Tier come back at
+        // md+ where there's room to read them. The min-w only
+        // applies once everything is visible.
         <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          <table className="w-full text-sm min-w-[940px]">
+          <table className="w-full text-sm xl:min-w-[940px]">
             <thead className="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-50 dark:bg-zinc-950">
               <tr>
                 <th className="px-3 py-2 text-left w-10">#</th>
                 <th className="px-3 py-2 text-left">Player</th>
-                <th className="px-3 py-2 text-left w-14">Pos</th>
-                <th className="px-3 py-2 text-left w-20">Team</th>
-                <th className="px-3 py-2 text-center w-14">Rd</th>
-                <th className="px-3 py-2 text-right w-16">Grade</th>
-                <th className="px-3 py-2 text-right w-14">RAS</th>
-                <th className="px-3 py-2 text-right w-14">40</th>
-                <th className="px-3 py-2 text-right w-20">PYV</th>
+                <th className="hidden sm:table-cell px-3 py-2 text-left w-14">Pos</th>
+                <th className="hidden md:table-cell px-3 py-2 text-left w-20">Team</th>
+                <th className="hidden md:table-cell px-3 py-2 text-center w-14">Rd</th>
+                <th className="hidden lg:table-cell px-3 py-2 text-right w-16">Grade</th>
+                <th className="hidden lg:table-cell px-3 py-2 text-right w-14">RAS</th>
+                <th className="hidden lg:table-cell px-3 py-2 text-right w-14">40</th>
+                <th className="px-3 py-2 text-right w-16 sm:w-20">PYV</th>
                 <th
-                  className="px-3 py-2 text-center w-16"
+                  className="px-3 py-2 text-center w-14 sm:w-16"
                   title="Equivalent pick in a 12-team rookie draft, ranked by PYV"
                 >
                   Pick
                 </th>
-                <th className="px-3 py-2 text-right w-20">Mkt</th>
-                <th className="px-3 py-2 text-left w-36">Tier</th>
+                <th className="hidden xl:table-cell px-3 py-2 text-right w-20">Mkt</th>
+                <th className="hidden md:table-cell px-3 py-2 text-left w-36">Tier</th>
               </tr>
             </thead>
             <tbody>
@@ -642,7 +647,7 @@ export default async function RookiesPage({
                 return (
                 <tr
                   key={r.key}
-                  className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                  className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 active:bg-zinc-100 dark:active:bg-zinc-800"
                 >
                   <td className="px-3 py-2 text-zinc-400 tabular-nums">
                     {pageOffset + i + 1}
@@ -683,8 +688,25 @@ export default async function RookiesPage({
                         </span>
                       )}
                     </span>
+                    {/* Phone-only summary line: Pos · Team · Rd. The
+                        dedicated Pos/Team/Rd columns are hidden at this
+                        breakpoint, so we inline the same info
+                        compactly here. */}
+                    <div className="sm:hidden text-xs text-zinc-500 mt-0.5">
+                      {[
+                        r.position,
+                        r.team,
+                        r.draftRound
+                          ? `R${r.draftRound}`
+                          : r.projectedRound
+                          ? `R${r.projectedRound}p`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="hidden sm:table-cell px-3 py-2">
                     {r.position ? (
                       <span className="inline-block rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-xs font-mono">
                         {r.position}
@@ -693,7 +715,7 @@ export default async function RookiesPage({
                       <span className="text-zinc-400">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-zinc-500">
+                  <td className="hidden md:table-cell px-3 py-2 text-zinc-500">
                     {r.team ? (
                       <span
                         title={
@@ -713,7 +735,7 @@ export default async function RookiesPage({
                       "—"
                     )}
                   </td>
-                  <td className="px-3 py-2 text-center text-zinc-500 tabular-nums">
+                  <td className="hidden md:table-cell px-3 py-2 text-center text-zinc-500 tabular-nums">
                     {r.draftRound ? (
                       `R${r.draftRound}`
                     ) : r.projectedRound ? (
@@ -730,13 +752,13 @@ export default async function RookiesPage({
                       "—"
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-zinc-500">
+                  <td className="hidden lg:table-cell px-3 py-2 text-right tabular-nums text-zinc-500">
                     {r.consensusGrade !== null
                       ? r.consensusGrade.toFixed(0)
                       : "—"}
                   </td>
                   <td
-                    className={`px-3 py-2 text-right tabular-nums ${
+                    className={`hidden lg:table-cell px-3 py-2 text-right tabular-nums ${
                       r.ras === null
                         ? "text-zinc-400"
                         : r.ras >= 8
@@ -748,7 +770,7 @@ export default async function RookiesPage({
                   >
                     {r.ras !== null ? r.ras.toFixed(1) : "—"}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-zinc-500">
+                  <td className="hidden lg:table-cell px-3 py-2 text-right tabular-nums text-zinc-500">
                     {r.forty !== null ? r.forty.toFixed(2) : "—"}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-semibold">
@@ -777,12 +799,12 @@ export default async function RookiesPage({
                       );
                     })()}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-zinc-500">
+                  <td className="hidden xl:table-cell px-3 py-2 text-right tabular-nums text-zinc-500">
                     {r.market !== null
                       ? Math.round(r.market)
                       : <span className="text-zinc-400">—</span>}
                   </td>
-                  <td className="px-3 py-2 text-xs text-zinc-500">
+                  <td className="hidden md:table-cell px-3 py-2 text-xs text-zinc-500">
                     {r.tier ?? (
                       <span className="text-zinc-400">Pre-draft</span>
                     )}
