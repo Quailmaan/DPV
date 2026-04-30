@@ -8,27 +8,37 @@ import { useMemo, useState } from "react";
 // player page, and the bundle savings are real on a route that loads
 // on every player click.
 //
-// Behavior:
-//   - Single line over a fixed-aspect SVG, padded for axis labels.
-//   - 4 horizontal grid lines + Y-axis tick labels (DPV scale).
-//   - First / last / current X-axis labels (date range).
-//   - Hover anywhere on the chart snaps the crosshair to the nearest
-//     data point and shows a small tooltip card. Touch users tap to
-//     pin, tap elsewhere to dismiss.
-//   - Range toggle (30D / 6M / 1Y / All) stays client-side; we get the
-//     full series from the parent and just slice it locally.
+// Two modes — the data table now carries both shapes, and they answer
+// different questions about the same player:
+//
+//   • SEASON  — one point per (NFL season). Past seasons come from the
+//               historical backfill (week=22 markers, snapshot_date
+//               anchored to Feb 15 of the following year). The current
+//               season — if it exists — is the latest live snapshot we
+//               have. This is the "career arc" view: how has this
+//               player's value tracked year-over-year?
+//
+//   • LIVE    — daily snapshots from the nightly compute. Same 30D / 6M
+//               / 1Y / All range toggle as before. This is the in-season
+//               "what's changed lately" view. Season-end markers are
+//               filtered out so they don't show up as a Feb-15 outlier
+//               point in the recent-trend window.
+//
+// Default mode picks itself based on what data we have:
+//   • ≥2 season-end markers → SEASON (established player)
+//   • otherwise              → LIVE   (rookie / first-year player)
 
 export type TrendPoint = {
   date: string; // YYYY-MM-DD, ascending order
   dpv: number;
-  // NFL anchoring (populated by compute-dpv ≥ Apr 29 2026). Optional so
-  // older history rows (pre-anchoring) still satisfy the type. The
-  // current chart doesn't render these — they're plumbed in for the
-  // upcoming season/week-grouped views.
+  // NFL anchoring (populated by compute-dpv ≥ Apr 29 2026 + the
+  // historical backfill). Older history rows pre-anchoring leave
+  // these null and only render in LIVE mode.
   season?: number | null;
   week?: number | null;
 };
 
+type Mode = "SEASON" | "LIVE";
 type Range = "30D" | "6M" | "1Y" | "ALL";
 
 const RANGES: { key: Range; label: string; days: number | null }[] = [
@@ -67,6 +77,50 @@ function formatDateLong(iso: string): string {
   });
 }
 
+// SEASON mode helpers --------------------------------------------------
+//
+// `points` is the full ascending-by-date series. We collapse it into one
+// point per (NFL season) by:
+//   1. Preferring the season-end marker (week === 22) when present —
+//      that's the canonical "this is what the season looked like in
+//      hindsight" snapshot from the backfill.
+//   2. Falling back to the latest in-season point for the current
+//      season, where no season-end marker exists yet.
+//   3. Dropping rows with no `season` set (pre-anchoring legacy rows).
+
+function collapseToSeasons(points: TrendPoint[]): TrendPoint[] {
+  const bySeason = new Map<number, TrendPoint>();
+  for (const p of points) {
+    if (p.season == null) continue;
+    const cur = bySeason.get(p.season);
+    if (!cur) {
+      bySeason.set(p.season, p);
+      continue;
+    }
+    const curIsMarker = cur.week === 22;
+    const newIsMarker = p.week === 22;
+    if (newIsMarker && !curIsMarker) {
+      bySeason.set(p.season, p);
+    } else if (!newIsMarker && !curIsMarker && p.date > cur.date) {
+      // Both in-season; keep the later one.
+      bySeason.set(p.season, p);
+    }
+    // (curIsMarker && !newIsMarker) → keep the marker.
+  }
+  return [...bySeason.values()].sort(
+    (a, b) => (a.season as number) - (b.season as number),
+  );
+}
+
+// Pretty label for a season point. Marker rows are "2024 season"; live
+// rows for the current season read "2026 (live)" so the user can tell
+// the still-evolving point apart from the locked-in past ones.
+function seasonLabel(p: TrendPoint): string {
+  if (p.season == null) return "—";
+  if (p.week === 22) return `${p.season} season`;
+  return `${p.season} (live)`;
+}
+
 export default function PyvTrendChart({
   points,
   positionLabel,
@@ -75,19 +129,33 @@ export default function PyvTrendChart({
   /** Used in the empty state so it reads "No PYV history yet for this WR" etc. */
   positionLabel?: string;
 }) {
+  // Auto-pick the mode that fits the data: SEASON for established
+  // players (≥2 season-end markers), LIVE otherwise.
+  const seasonMarkerCount = useMemo(
+    () => points.filter((p) => p.week === 22).length,
+    [points],
+  );
+  const [mode, setMode] = useState<Mode>(
+    seasonMarkerCount >= 2 ? "SEASON" : "LIVE",
+  );
   const [range, setRange] = useState<Range>("ALL");
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
-  // Slice to the active range. We expect `points` to be ascending by
-  // date — slice from the end so "30D" = last 30 days.
+  // Build the visible array based on mode.
   const visible = useMemo(() => {
+    if (mode === "SEASON") {
+      return collapseToSeasons(points);
+    }
+    // LIVE: drop season-end markers (Feb-15 backfill rows) so the daily
+    // trend isn't punctuated by phantom February points.
+    const live = points.filter((p) => p.week !== 22);
     const cfg = RANGES.find((r) => r.key === range);
-    if (!cfg || cfg.days === null) return points;
+    if (!cfg || cfg.days === null) return live;
     const cutoff = new Date();
     cutoff.setUTCDate(cutoff.getUTCDate() - cfg.days);
     const cutoffIso = cutoff.toISOString().slice(0, 10);
-    return points.filter((p) => p.date >= cutoffIso);
-  }, [points, range]);
+    return live.filter((p) => p.date >= cutoffIso);
+  }, [points, mode, range]);
 
   // Empty / single-point states. A single point is technically a chart
   // but a "line" needs ≥2; we render a hint instead.
@@ -102,10 +170,23 @@ export default function PyvTrendChart({
             </span>
           </>
         ) : (
-          <>
-            Not enough data in this range — try a wider window.
-            <RangeToggle range={range} setRange={setRange} />
-          </>
+          <div className="space-y-2">
+            <div>
+              {mode === "SEASON"
+                ? "Not enough season history yet — try the live view."
+                : "Not enough data in this range — try a wider window."}
+            </div>
+            <div className="flex items-center gap-2">
+              <ModeToggle
+                mode={mode}
+                setMode={setMode}
+                hasSeasonData={seasonMarkerCount >= 2}
+              />
+              {mode === "LIVE" && (
+                <RangeToggle range={range} setRange={setRange} />
+              )}
+            </div>
+          </div>
         )}
       </div>
     );
@@ -173,13 +254,30 @@ export default function PyvTrendChart({
 
   const hover = hoverIdx !== null ? visible[hoverIdx] : null;
 
+  // Header range label — different shape for each mode.
+  const rangeLabel =
+    mode === "SEASON"
+      ? `${visible[0].season} → ${visible[visible.length - 1].season}`
+      : `${formatDateLong(visible[0].date)} → ${formatDateLong(visible[visible.length - 1].date)}`;
+
+  // X-axis tick labels: first / mid / last.
+  // SEASON mode shows the 4-digit year; LIVE mode shows the date.
+  const xTickIndices = [0, Math.floor(visible.length / 2), visible.length - 1];
+  const xTickLabel = (p: TrendPoint): string =>
+    mode === "SEASON" ? String(p.season ?? "") : formatDate(p.date);
+
   return (
     <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <div className="text-sm font-medium">PYV trend</div>
+      <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">
+            PYV trend
+            <span className="ml-2 text-xs font-normal text-zinc-500">
+              {mode === "SEASON" ? "by season" : "live"}
+            </span>
+          </div>
           <div className="text-xs text-zinc-500">
-            {formatDateLong(visible[0].date)} → {formatDateLong(visible[visible.length - 1].date)}
+            {rangeLabel}
             <span
               className={`ml-2 font-medium ${
                 netDelta > 0
@@ -194,7 +292,16 @@ export default function PyvTrendChart({
             </span>
           </div>
         </div>
-        <RangeToggle range={range} setRange={setRange} />
+        <div className="flex items-center gap-2">
+          <ModeToggle
+            mode={mode}
+            setMode={setMode}
+            hasSeasonData={seasonMarkerCount >= 2}
+          />
+          {mode === "LIVE" && (
+            <RangeToggle range={range} setRange={setRange} />
+          )}
+        </div>
       </div>
 
       <div className="relative">
@@ -204,7 +311,7 @@ export default function PyvTrendChart({
           onMouseMove={handleMove}
           onMouseLeave={() => setHoverIdx(null)}
           role="img"
-          aria-label="PYV trend over time"
+          aria-label={`PYV trend ${mode === "SEASON" ? "by season" : "over time"}`}
         >
           {/* Y grid lines + labels */}
           {yTicks.map((v) => {
@@ -232,8 +339,8 @@ export default function PyvTrendChart({
             );
           })}
 
-          {/* X-axis date labels — first, mid, last */}
-          {[0, Math.floor(visible.length / 2), visible.length - 1].map((i, k) => (
+          {/* X-axis labels — first, mid, last */}
+          {xTickIndices.map((i, k) => (
             <text
               key={`xtick-${k}`}
               x={xFor(i)}
@@ -241,7 +348,7 @@ export default function PyvTrendChart({
               textAnchor={k === 0 ? "start" : k === 2 ? "end" : "middle"}
               className="fill-zinc-400 dark:fill-zinc-500 text-[10px]"
             >
-              {formatDate(visible[i].date)}
+              {xTickLabel(visible[i])}
             </text>
           ))}
 
@@ -257,6 +364,24 @@ export default function PyvTrendChart({
             strokeLinejoin="round"
             strokeLinecap="round"
           />
+
+          {/* SEASON mode: render a dot at every point so the year-over-year
+              shape is legible even when the line is short. We skip these
+              in LIVE mode because daily series have hundreds of points
+              and the dots would just become noise. */}
+          {mode === "SEASON" &&
+            visible.map((p, i) => (
+              <circle
+                key={`pt-${i}`}
+                cx={xFor(i)}
+                cy={yFor(p.dpv)}
+                r={3}
+                fill={lineColor}
+                stroke="white"
+                strokeWidth={1.5}
+                className="dark:stroke-zinc-900"
+              />
+            ))}
 
           {/* Hover crosshair + dot */}
           {hover && hoverIdx !== null && (
@@ -298,11 +423,57 @@ export default function PyvTrendChart({
                   : undefined,
             }}
           >
-            <div className="text-zinc-500">{formatDateLong(hover.date)}</div>
+            <div className="text-zinc-500">
+              {mode === "SEASON"
+                ? seasonLabel(hover)
+                : formatDateLong(hover.date)}
+            </div>
             <div className="font-semibold tabular-nums">PYV {hover.dpv}</div>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ModeToggle({
+  mode,
+  setMode,
+  hasSeasonData,
+}: {
+  mode: Mode;
+  setMode: (m: Mode) => void;
+  /** Disable the SEASON option when the player has < 2 season-end markers. */
+  hasSeasonData: boolean;
+}) {
+  const options: { key: Mode; label: string; disabled?: boolean }[] = [
+    { key: "SEASON", label: "Season", disabled: !hasSeasonData },
+    { key: "LIVE", label: "Live" },
+  ];
+  return (
+    <div className="flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-xs">
+      {options.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          onClick={() => !o.disabled && setMode(o.key)}
+          disabled={o.disabled}
+          className={`px-2 py-1 ${
+            mode === o.key
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : o.disabled
+              ? "text-zinc-300 dark:text-zinc-700 cursor-not-allowed"
+              : "hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+          }`}
+          title={
+            o.disabled
+              ? "Need ≥ 2 completed seasons of history for this view"
+              : undefined
+          }
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
