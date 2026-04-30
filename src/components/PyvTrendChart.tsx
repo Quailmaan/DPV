@@ -21,6 +21,12 @@ import { useMemo, useState } from "react";
 export type TrendPoint = {
   date: string; // YYYY-MM-DD, ascending order
   dpv: number;
+  // NFL anchoring (populated by compute-dpv ≥ Apr 29 2026). Optional so
+  // older history rows (pre-anchoring) still satisfy the type. The
+  // current chart doesn't render these — they're plumbed in for the
+  // upcoming season/week-grouped views.
+  season?: number | null;
+  week?: number | null;
 };
 
 type Range = "30D" | "6M" | "1Y" | "ALL";

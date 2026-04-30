@@ -16,6 +16,10 @@ import type { DPVBreakdown, ScoringFormat } from "./types";
 export type DpvDataPoint = {
   snapshotDate: string; // YYYY-MM-DD
   dpv: number;
+  // NFL anchoring (added in the season/week migration). Null for older
+  // rows written before the columns existed — UI must degrade gracefully.
+  season?: number | null;
+  week?: number | null;
 };
 
 export type DpvTrajectory = {
@@ -58,7 +62,7 @@ export async function loadHistoryForPlayer(
 ): Promise<DpvDataPoint[]> {
   const { data, error } = await sb
     .from("dpv_history")
-    .select("snapshot_date, dpv")
+    .select("snapshot_date, dpv, season, week")
     .eq("player_id", playerId)
     .eq("scoring_format", scoringFormat)
     .order("snapshot_date", { ascending: false });
@@ -66,6 +70,8 @@ export async function loadHistoryForPlayer(
   return data.map((r) => ({
     snapshotDate: r.snapshot_date as string,
     dpv: r.dpv as number,
+    season: (r.season ?? null) as number | null,
+    week: (r.week ?? null) as number | null,
   }));
 }
 
@@ -85,7 +91,7 @@ export async function loadHistoryForPlayers(
     const slice = playerIds.slice(i, i + CHUNK);
     const { data, error } = await sb
       .from("dpv_history")
-      .select("player_id, snapshot_date, dpv")
+      .select("player_id, snapshot_date, dpv, season, week")
       .in("player_id", slice)
       .eq("scoring_format", scoringFormat)
       .order("snapshot_date", { ascending: false });
@@ -94,9 +100,16 @@ export async function loadHistoryForPlayers(
       player_id: string;
       snapshot_date: string;
       dpv: number;
+      season: number | null;
+      week: number | null;
     }>) {
       const arr = out.get(r.player_id) ?? [];
-      arr.push({ snapshotDate: r.snapshot_date, dpv: r.dpv });
+      arr.push({
+        snapshotDate: r.snapshot_date,
+        dpv: r.dpv,
+        season: r.season ?? null,
+        week: r.week ?? null,
+      });
       out.set(r.player_id, arr);
     }
   }

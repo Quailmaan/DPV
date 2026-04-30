@@ -291,11 +291,17 @@ export default async function PlayerPage({
       : null;
 
   // Trend chart series: convert the descending history into ascending
-  // for plotting, and drop to (date, dpv) only — the chart line uses
-  // nothing else.
+  // for plotting. Carry season + week through so future views (career
+  // arc grouped by season, in-season weekly trend) can group off them
+  // without re-querying.
   const trendPoints: TrendPoint[] = [...historyPoints]
     .reverse()
-    .map((p) => ({ date: p.snapshotDate, dpv: p.dpv }));
+    .map((p) => ({
+      date: p.snapshotDate,
+      dpv: p.dpv,
+      season: p.season ?? null,
+      week: p.week ?? null,
+    }));
 
   // "What changed" comparison: only meaningful for veterans where the
   // current snapshot has a real DPVBreakdown. Rookies have a different

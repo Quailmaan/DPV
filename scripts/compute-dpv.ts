@@ -6,6 +6,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { calculateDPV } from "../src/lib/dpv/dpv";
 import { CURRENT_SEASON } from "../src/lib/dpv/constants";
+import { nflContext } from "../src/lib/dpv/nflContext";
 import {
   computeRookiePrior,
   rookiePriorTier,
@@ -32,7 +33,14 @@ const sb = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
 });
 
 const FORMATS: ScoringFormat[] = ["STANDARD", "HALF_PPR", "FULL_PPR"];
-const TODAY = new Date("2026-04-22");
+// Real wall-clock date. Earlier versions of this script hardcoded a
+// fixed date for repeatable local debugging, which silently broke the
+// dpv_history time-series — every nightly run was upserting to the same
+// snapshot_date instead of appending a new row. If you need a fixed
+// date for a one-off backfill, set DPV_SNAPSHOT_DATE=YYYY-MM-DD.
+const TODAY = process.env.DPV_SNAPSHOT_DATE
+  ? new Date(`${process.env.DPV_SNAPSHOT_DATE}T00:00:00Z`)
+  : new Date();
 
 // Match the /rookies page name normalization so the consensus-match gate
 // on rookie priors uses the same join key.
@@ -903,13 +911,22 @@ async function main() {
   // same-day rerun idempotent — values from the last run of the day
   // are what end up persisted.
   const snapshotDate = TODAY.toISOString().slice(0, 10);
-  console.log(`Writing dpv_history for ${snapshotDate}...`);
+  // Anchor every row to the NFL (season, week) the snapshot represents.
+  // Lets the trend chart group by season for a "career arc" view and by
+  // week within a season for the live in-season view. Offseason
+  // snapshots get a non-null season but null week.
+  const ctx = nflContext(TODAY);
+  console.log(
+    `Writing dpv_history for ${snapshotDate} (season ${ctx.season}, week ${ctx.week ?? "—"})...`,
+  );
   const historyRows = combined.map((c) => ({
     player_id: c.player_id,
     scoring_format: c.scoring_format,
     snapshot_date: snapshotDate,
     dpv: c.dpv,
     breakdown: c.breakdown,
+    season: ctx.season,
+    week: ctx.week,
   }));
   for (let i = 0; i < historyRows.length; i += BATCH) {
     const chunk = historyRows.slice(i, i + BATCH);

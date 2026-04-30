@@ -97,14 +97,29 @@ create table if not exists public.dpv_history (
   -- breakdown — the "what changed" UI degrades gracefully when it's
   -- missing.
   breakdown jsonb,
+  -- NFL-season anchoring. Lets the trend chart group daily snapshots by
+  -- season for a "career arc" view (one point per season, picking the
+  -- last snapshot in each) and group in-season snapshots by week for a
+  -- live "this season" view. season is the NFL season year (e.g., 2025
+  -- for the 2025-26 season — Sept 2025 kickoff through Feb 2026
+  -- Super Bowl). week is 1-22 during the season (1-18 regular, 19-22
+  -- playoffs) or null during the offseason. Both nullable so rows
+  -- written before this column existed don't need backfill to keep
+  -- working.
+  season int,
+  week int,
   primary key (player_id, scoring_format, snapshot_date)
 );
 
--- Idempotent column add for existing deploys: re-running schema.sql
--- against a database that already has dpv_history (without the
--- breakdown column) backfills it as nullable.
+-- Idempotent column adds for existing deploys: re-running schema.sql
+-- against a database that already has dpv_history backfills the new
+-- columns as nullable.
 alter table public.dpv_history
   add column if not exists breakdown jsonb;
+alter table public.dpv_history
+  add column if not exists season int;
+alter table public.dpv_history
+  add column if not exists week int;
 
 -- Trajectory queries hit (player_id, scoring_format) and walk back in
 -- time, so the index leads with those and orders by date desc.
