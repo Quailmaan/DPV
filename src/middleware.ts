@@ -34,6 +34,10 @@ const PUBLIC_PREFIXES = [
   "/api/cron",
   "/api/stripe/webhook",
   "/email/unsubscribe",
+  // Offline shell is rendered by the service worker when navigations
+  // fail — the user is by definition not authenticating in that state,
+  // so it has to be reachable without a session.
+  "/offline",
 ];
 
 export async function middleware(request: NextRequest) {
@@ -95,7 +99,13 @@ export async function middleware(request: NextRequest) {
 export const config = {
   // Skip middleware for static assets and Next internals — auth refresh
   // doesn't need to run for /_next, favicon, images, etc.
+  //
+  // The PWA assets (`manifest.webmanifest`, `sw.js`) are also excluded:
+  // browsers fetch them without credentials/cookies during install
+  // checks, and gating them behind auth breaks "Add to Home Screen"
+  // entirely. The service worker itself is at /sw.js and MUST be
+  // publicly reachable for it to register at all.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

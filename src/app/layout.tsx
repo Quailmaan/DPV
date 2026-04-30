@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import Image from "next/image";
@@ -6,6 +6,7 @@ import Link from "next/link";
 import HeaderAuth from "@/components/HeaderAuth";
 import MobileNav from "@/components/MobileNav";
 import { PylonWordmark } from "@/components/PylonLogo";
+import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 import { SUPPORT_EMAIL, mailtoHref } from "@/lib/site/contact";
 import "./globals.css";
 
@@ -23,6 +24,39 @@ export const metadata: Metadata = {
   title: "Pylon",
   description:
     "Data-driven dynasty fantasy football values with historical comps and market calibration.",
+  // PWA metadata. The manifest is auto-served by Next.js from
+  // src/app/manifest.ts at /manifest.webmanifest. iOS Safari ignores
+  // manifest icons, so we point apple-touch-icon at the dedicated
+  // 180×180 we generate in scripts/generate-pwa-icons.ts.
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Pylon",
+    // "black-translucent" lets our content draw behind the status bar
+    // when launched from the home screen — matches the standalone
+    // dark theme we set in the manifest.
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+};
+
+// Viewport sits in its own export in Next 14+. `themeColor` colors
+// the OS chrome (Android status bar, iOS standalone status bar) and
+// uses media queries so it tracks the user's light/dark preference.
+// `viewportFit: "cover"` lets the app draw into the iPhone notch area
+// when launched as a standalone PWA.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+  ],
+  viewportFit: "cover",
 };
 
 // Auth/landing routes that render full-bleed without the site nav.
@@ -49,6 +83,7 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+        <ServiceWorkerRegistrar />
         {isAuthRoute ? (
           // Full-viewport centered shell for the gate. No header, no
           // nav — just the landing card.
