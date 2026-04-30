@@ -47,7 +47,7 @@ export function calculateDPV(input: DPVInput): DPVResult {
   const { profile, seasons, opportunity, situation, scoringFormat } = input;
   const { position, age } = profile;
 
-  const bps = calculateBPS(seasons, position, scoringFormat);
+  const bps = calculateBPS(seasons, position, scoringFormat, input.asOfSeason);
   const am = ageModifier(position, age);
   const os = calculateOpportunityScore(position, opportunity);
   const olqi = olineModifier(position, situation.teamOLineCompositeRank);

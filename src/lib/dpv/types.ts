@@ -100,6 +100,12 @@ export interface DPVInput {
   // They multiply together — a player can be hit by both.
   qbStarterRateMult?: number;
   qbDepthChartMult?: number;
+  // Reference season for "is this player current?" logic. Defaults to
+  // CURRENT_SEASON for the live nightly compute. The historical backfill
+  // overrides this with the target past season so the recency filter in
+  // calculateBPS shifts back in time (e.g., asOfSeason=2017 → BPS uses
+  // 2014-2017 only, not 2022-2025).
+  asOfSeason?: number;
 }
 
 export interface DPVBreakdown {

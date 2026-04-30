@@ -29,13 +29,19 @@ export function calculateBPS(
   seasons: SeasonStats[],
   position: Position,
   format: ScoringFormat,
+  asOfSeason: number = CURRENT_SEASON,
 ): number {
   // Hard recency window: a "3-year BPS" means the last 3 calendar years, not
   // "3 most recent seasons played." Skipping years shouldn't silently drag in
   // ancient production (e.g., Watson's 2019/2020 showing up in 2026 rankings).
+  //
+  // `asOfSeason` defaults to CURRENT_SEASON for the live nightly compute, but
+  // the historical backfill passes the target past season so the same recency
+  // logic shifts back in time (e.g., asOfSeason=2017 → window 2014-2017).
   const qualifying = seasons
     .filter((s) => s.gamesPlayed >= 7)
-    .filter((s) => s.season >= CURRENT_SEASON - 3)
+    .filter((s) => s.season >= asOfSeason - 3)
+    .filter((s) => s.season <= asOfSeason)
     .sort((a, b) => b.season - a.season)
     .slice(0, 3);
 
@@ -59,10 +65,10 @@ export function calculateBPS(
       : 1.0;
 
   // Missed-season penalty — if the player has no qualifying season in the
-  // current year, their projection carries rust/injury risk. Applies across
+  // reference year, their projection carries rust/injury risk. Applies across
   // positions.
   const missedCurrentSeasonPenalty =
-    qualifying[0].season < CURRENT_SEASON ? 0.85 : 1.0;
+    qualifying[0].season < asOfSeason ? 0.85 : 1.0;
 
   const basePenalty = qbSmallSamplePenalty * missedCurrentSeasonPenalty;
 
