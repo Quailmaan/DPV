@@ -39,6 +39,13 @@ export type LandingSpotInput = {
   } | null;
   /** True for rookies + 2nd-year players with no qualifying NFL season. */
   isRookieProfile: boolean;
+  /** Subject player's own DPV. Used so the depth-chart logic only flags
+   *  teammates as "ahead" when their DPV is meaningfully above the
+   *  subject's — otherwise an established alpha (e.g., Amon-Ra) gets
+   *  incorrectly told a clearly-lesser teammate is "the incumbent."
+   *  Default 0 = treat the subject as a non-factor (correct for raw
+   *  pre-draft prospects with no production yet). */
+  subjectDpv?: number;
 };
 
 // DPV thresholds for "starter-caliber" by position. Calibrated against the
@@ -68,7 +75,12 @@ export function analyzeLandingSpot(
   const pos = input.position.toUpperCase();
 
   // ── A. Draft Capital ────────────────────────────────────────────────
-  if (input.draftRound !== null) {
+  // Only meaningful for rookies + early-career players still searching
+  // for a qualifying season. Once a player has produced ≥1 real NFL
+  // year, draft round is stale signal — their BPS / opportunity score
+  // already encodes everything it tried to predict. Surfacing
+  // "Round-4 pick" on a 5th-year alpha is just noise.
+  if (input.isRookieProfile && input.draftRound !== null) {
     const r = input.draftRound;
     if (r === 1) {
       bullets.push({
@@ -114,11 +126,18 @@ export function analyzeLandingSpot(
   }
 
   // ── B. Depth Chart Competition ─────────────────────────────────────
-  // The headline insight the user wanted: a 1st-rounder buried on a deep
-  // chart still plays; a 4th-rounder behind one starter probably doesn't.
+  // The headline insight: a 1st-rounder buried on a deep chart still
+  // plays; a 4th-rounder behind one starter probably doesn't.
+  //
+  // A teammate is only a "blocker" when (a) they're starter-caliber for
+  // the position AND (b) their DPV is meaningfully above the subject's.
+  // The second condition is what stops Amon-Ra (6421 DPV) from being
+  // told Jameson Williams (~3000 DPV) is "ahead" of him — the established
+  // alpha doesn't have anyone ahead of him on his own depth chart.
   const threshold = STARTER_DPV[pos] ?? 4500;
+  const subjectDpv = input.subjectDpv ?? 0;
   const blockers = input.teammates
-    .filter((t) => t.dpv >= threshold)
+    .filter((t) => t.dpv >= threshold && t.dpv > subjectDpv)
     .sort((a, b) => b.dpv - a.dpv);
   const hasCapital =
     input.draftRound !== null && input.draftRound <= 2;

@@ -458,6 +458,11 @@ export default async function PlayerPage({
         }
       : null,
     isRookieProfile,
+    // Pass the subject's own DPV so the depth-chart logic can correctly
+    // tell an established alpha apart from a buried backup. Without this,
+    // any starter-caliber teammate gets flagged as "ahead" — even when
+    // the subject is the team's clear WR1.
+    subjectDpv: snapshot?.dpv ?? 0,
   };
   const landingBullets = analyzeLandingSpot(landingSpotInput);
 
