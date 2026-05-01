@@ -78,34 +78,76 @@ function fmt(n: number, digits = 3): string {
   return n.toFixed(digits).padStart(7);
 }
 
+// Supabase JS's default select() caps at 1000 rows. The players table
+// has ~3000+ rows and player_advanced_stats can exceed 1000 per season,
+// so we have to paginate manually with .range() until we exhaust the
+// result. Without this, the buckets silently drop ~70% of rows because
+// most player_ids never get a match in playerById.
+async function fetchAll<T>(
+  table: string,
+  columns: string,
+  filter?: (q: ReturnType<ReturnType<typeof sb.from>["select"]>) => unknown,
+): Promise<T[]> {
+  const out: T[] = [];
+  const PAGE = 1000;
+  let start = 0;
+  while (true) {
+    let q = sb.from(table).select(columns) as ReturnType<
+      ReturnType<typeof sb.from>["select"]
+    >;
+    if (filter) q = filter(q) as typeof q;
+    const { data, error } = await q.range(start, start + PAGE - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as T[];
+    out.push(...batch);
+    if (batch.length < PAGE) break;
+    start += PAGE;
+  }
+  return out;
+}
+
 async function main() {
   console.log(`Inspecting advanced stats for ${SEASON} season\n`);
 
-  const [{ data: rows }, { data: players }] = await Promise.all([
-    sb
-      .from("player_advanced_stats")
-      .select(
-        "player_id,season,passing_epa_per_dropback,rushing_epa_per_carry,receiving_epa_per_target,avg_adot,yac_per_reception,dropbacks,carries,targets,receptions",
-      )
-      .eq("season", SEASON),
-    sb.from("players").select("player_id,name,position"),
+  const [rows, players] = await Promise.all([
+    fetchAll<Row>(
+      "player_advanced_stats",
+      "player_id,season,passing_epa_per_dropback,rushing_epa_per_carry,receiving_epa_per_target,avg_adot,yac_per_reception,dropbacks,carries,targets,receptions",
+      (q) => q.eq("season", SEASON),
+    ),
+    fetchAll<Player>("players", "player_id,name,position"),
   ]);
 
-  if (!rows || rows.length === 0) {
+  console.log(
+    `Loaded ${rows.length} advanced-stats rows for season=${SEASON}, ${players.length} players\n`,
+  );
+
+  if (rows.length === 0) {
     console.log(`No rows in player_advanced_stats for season=${SEASON}.`);
     console.log("Run scripts/ingest.py first.");
     return;
   }
 
   const playerById = new Map<string, Player>();
-  for (const p of (players ?? []) as Player[]) {
+  for (const p of players) {
     playerById.set(p.player_id, p);
   }
+
+  // Diagnostic: how many advanced-stats rows could NOT be matched to
+  // a player. Should be near zero — if it's not, something's off in
+  // the ingest's existing_ids filter.
+  let unmatched = 0;
+  for (const r of rows) {
+    if (!playerById.has(r.player_id)) unmatched++;
+  }
+  console.log(
+    `${unmatched} advanced-stats rows have no matching player (should be 0)\n`,
+  );
 
   // Bucket each row by the player's roster position so we report
   // QB efficiency separately from WR efficiency, etc.
   const buckets: Record<string, Row[]> = { QB: [], RB: [], WR: [], TE: [] };
-  for (const r of rows as Row[]) {
+  for (const r of rows) {
     const p = playerById.get(r.player_id);
     if (!p) continue;
     if (!(p.position in buckets)) continue;
