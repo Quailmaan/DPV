@@ -47,7 +47,7 @@ export default async function RankingsPage({
     sb
       .from("dpv_snapshots")
       .select(
-        "dpv, tier, player_id, players(name, position, current_team, birthdate)",
+        "dpv, tier, player_id, breakdown, players(name, position, current_team, birthdate)",
       )
       .eq("scoring_format", fmt)
       .order("dpv", { ascending: false }),
@@ -97,6 +97,7 @@ export default async function RankingsPage({
     dpv: number;
     tier: string;
     player_id: string;
+    breakdown: { efficiencyMultiplier?: number } | null;
     players: {
       name: string;
       position: string;
@@ -144,6 +145,40 @@ export default async function RankingsPage({
       (Date.now() - new Date(bd).getTime()) /
       (365.25 * 24 * 3600 * 1000);
     return years.toFixed(1);
+  }
+
+  // Format the EPA-per-opportunity efficiency multiplier as a labeled
+  // percent delta vs. position average. Returns `—` for missing data
+  // or league-average values (within rounding) so we don't clutter
+  // the table with "+0.0%" entries that read as noise. The multiplier
+  // is bounded [0.85, 1.15] in efficiency.ts so the displayed range
+  // is roughly ±15%.
+  function formatEff(eff: number | undefined | null) {
+    if (eff === undefined || eff === null) {
+      return {
+        label: "—",
+        color: "text-zinc-400",
+        title: "No advanced-stats data — neutral PYV impact",
+      };
+    }
+    const pct = (eff - 1) * 100;
+    if (Math.abs(pct) < 0.5) {
+      // Sub-threshold opportunities → multiplier collapsed to 1.0× by
+      // efficiency.ts. Same visual as "no data" since the user can't
+      // act on the distinction.
+      return {
+        label: "—",
+        color: "text-zinc-400",
+        title: "Below sample threshold — neutral PYV impact",
+      };
+    }
+    const label = pct > 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
+    const color =
+      pct > 0
+        ? "text-emerald-600 dark:text-emerald-400"
+        : "text-red-600 dark:text-red-400";
+    const title = `${pct > 0 ? "+" : ""}${pct.toFixed(1)}% vs. position-average EPA per opportunity`;
+    return { label, color, title };
   }
 
   // Filter-bar links: any filter change resets pagination back to page 1
@@ -247,6 +282,12 @@ export default async function RankingsPage({
                 <th className="hidden md:table-cell px-4 py-2 text-left w-20">Team</th>
                 <th className="hidden md:table-cell px-4 py-2 text-right w-16">Age</th>
                 <th className="px-3 sm:px-4 py-2 text-right w-16 sm:w-24">PYV</th>
+                <th
+                  className="hidden md:table-cell px-4 py-2 text-right w-20"
+                  title="EPA-per-opportunity efficiency relative to position average. Bounded ±15%."
+                >
+                  Eff
+                </th>
                 <th className="hidden lg:table-cell px-4 py-2 text-right w-24">Market</th>
                 <th className="hidden lg:table-cell px-4 py-2 text-right w-20">Δ</th>
                 <th className="hidden sm:table-cell px-4 py-2 text-left w-36">Tier</th>
@@ -262,6 +303,7 @@ export default async function RankingsPage({
                     ? mktRank - dpvRank
                     : null;
                 const posRank = positionRanks.get(r.player_id);
+                const eff = formatEff(r.breakdown?.efficiencyMultiplier);
                 return (
                   <tr
                     key={r.player_id}
@@ -279,14 +321,24 @@ export default async function RankingsPage({
                       >
                         {r.players!.name}
                       </Link>
-                      {/* On phones the Pos/Team columns are hidden; show
-                          a compact "POS · TEAM" line under the name so
-                          the row is still self-explanatory. */}
+                      {/* On phones the Pos/Team/Eff columns are hidden;
+                          show a compact "POS · TEAM · EFF%" summary
+                          under the name so the row is still
+                          self-explanatory. Eff is only appended when
+                          it's non-neutral so we don't add visual noise
+                          for the majority of players who land at the
+                          neutral "—" multiplier. */}
                       <div className="sm:hidden text-xs text-zinc-500 mt-0.5">
                         {r.players!.position}
                         {r.players!.current_team
                           ? ` · ${r.players!.current_team}`
                           : ""}
+                        {eff.label !== "—" ? (
+                          <>
+                            {" · "}
+                            <span className={eff.color}>{eff.label}</span>
+                          </>
+                        ) : null}
                       </div>
                     </td>
                     <td className="hidden sm:table-cell px-4 py-2">
@@ -302,6 +354,12 @@ export default async function RankingsPage({
                     </td>
                     <td className="px-3 sm:px-4 py-2 text-right tabular-nums font-semibold">
                       {r.dpv}
+                    </td>
+                    <td
+                      className={`hidden md:table-cell px-4 py-2 text-right tabular-nums ${eff.color}`}
+                      title={eff.title}
+                    >
+                      {eff.label}
                     </td>
                     <td className="hidden lg:table-cell px-4 py-2 text-right tabular-nums text-zinc-500">
                       {market !== undefined ? Math.round(market) : "—"}

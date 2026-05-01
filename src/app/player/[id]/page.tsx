@@ -20,6 +20,9 @@ import {
 } from "@/lib/dpv/trajectory";
 import { compareBreakdowns } from "@/lib/dpv/whatChanged";
 import PyvTrendChart, { type TrendPoint } from "@/components/PyvTrendChart";
+import ReceivingProfileCard, {
+  type ReceivingProfilePoint,
+} from "@/components/ReceivingProfileCard";
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: "STANDARD", label: "Standard" },
@@ -167,6 +170,7 @@ export default async function PlayerPage({
     combineRes,
     historyPoints,
     historyComparePoint,
+    advancedRes,
   ] = await Promise.all([
     sb.from("players").select("*").eq("player_id", id).maybeSingle(),
     sb
@@ -207,6 +211,16 @@ export default async function PlayerPage({
     // has a breakdown. Returns null until at least one historical row
     // has been written with the breakdown column populated.
     loadHistoricalBreakdown(sb, id, fmt, 30),
+    // Per-season aDOT + YAC + EPA-per-opportunity history. Drives
+    // the Pro-tier ReceivingProfileCard. Sorted ascending so the
+    // chart axis reads left-to-right oldest→newest.
+    sb
+      .from("player_advanced_stats")
+      .select(
+        "season, avg_adot, yac_per_reception, targets, receptions",
+      )
+      .eq("player_id", id)
+      .order("season", { ascending: true }),
   ]);
 
   if (playerRes.error || !playerRes.data) return notFound();
@@ -745,6 +759,33 @@ export default async function PlayerPage({
             </table>
           </div>
         </div>
+      )}
+
+      {/* Receiving profile (Pro). aDOT + YAC trends are receiving-only
+          metrics, so we hide the section entirely for QB and RB rather
+          than show an empty card. The component itself also hides if
+          there's no qualifying-sample season — guards both ends. */}
+      {(player.position === "WR" || player.position === "TE") && (
+        <ReceivingProfileCard
+          isPro={isPro}
+          points={
+            ((advancedRes.data ?? []) as Array<{
+              season: number;
+              avg_adot: number | null;
+              yac_per_reception: number | null;
+              targets: number | null;
+              receptions: number | null;
+            }>).map(
+              (r): ReceivingProfilePoint => ({
+                season: r.season,
+                adot: r.avg_adot,
+                yacPerReception: r.yac_per_reception,
+                targets: r.targets ?? 0,
+                receptions: r.receptions ?? 0,
+              }),
+            )
+          }
+        />
       )}
 
       {breakdown && (
