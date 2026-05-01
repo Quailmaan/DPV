@@ -26,11 +26,11 @@ import {
   type SellWindow,
 } from "@/lib/dpv/sellWindow";
 import {
-  findTrades,
   type TradeFinderTeam,
   type TradeFinderPlayer,
   type TradePosition,
 } from "@/lib/league/tradeFinder";
+import { findBiggestRecentTrade } from "@/lib/sleeper/transactions";
 import {
   computeReportCards,
   type LeaguePick,
@@ -41,6 +41,8 @@ import {
 import type { ScoringFormat } from "@/lib/dpv/types";
 import type {
   DigestLeague,
+  DigestLeagueLoser,
+  DigestLeagueTrade,
   DigestMover,
   DigestPlayer,
   DigestPositionRank,
@@ -393,9 +395,11 @@ async function loadOneLeague(
     .filter((r) => r.roster_id !== focusedRoster.roster_id)
     .map(buildTradeFinderTeam);
 
-  // Top 2 trades — emails surface fewer than the on-page Trade Ideas
-  // section so the digest stays scannable.
-  const tradeIdeas = findTrades(myTeam, others, leaguePosAvg, { maxIdeas: 2 });
+  // The on-page trade-finder produces specific "Send X → Receive Y"
+  // ideas. The digest deliberately does NOT include these — feedback
+  // says the email should tell the user WHICH POSITION to target,
+  // and let them open the league page for specific names. The
+  // weakest position + tradePartners section below carries that role.
 
   // Top 3 SELL signals on the focused team. SELL_NOW first, then
   // SELL_SOON. The DigestPlayer shape strips the noisy fields the
@@ -579,6 +583,140 @@ async function loadOneLeague(
     }
   }
 
+  // ── League-wide biggest PYV drop this week ──────────────────────
+  // Same dpv_history window logic as the focused-roster movers, but
+  // widened to ALL rostered players in the league. Useful as gossip
+  // and as a "watch this asset" signal independent of who owns them.
+  let leagueLoser: DigestLeagueLoser | null = null;
+  {
+    const allRosteredIds = new Set<string>();
+    const ownerOfPlayer = new Map<string, string>();
+    for (const r of rosters) {
+      for (const pid of r.player_ids) {
+        allRosteredIds.add(pid);
+        ownerOfPlayer.set(
+          pid,
+          r.owner_display_name ?? `Team ${r.roster_id}`,
+        );
+      }
+    }
+    if (allRosteredIds.size > 0) {
+      const tenDaysAgo = new Date(
+        Date.now() - 10 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      // Two-step: first find the latest two distinct snapshot dates
+      // for this format, then pull the player rows for those exact
+      // dates. Keeps the second query cheap by avoiding range scans.
+      const { data: dateRows } = await sb
+        .from("dpv_history")
+        .select("snapshot_date")
+        .eq("scoring_format", league.scoring_format)
+        .gte("snapshot_date", tenDaysAgo.slice(0, 10))
+        .order("snapshot_date", { ascending: false })
+        .limit(200);
+      const allDates = [
+        ...new Set(((dateRows ?? []) as { snapshot_date: string }[]).map(
+          (r) => r.snapshot_date,
+        )),
+      ].sort((a, b) => (a < b ? 1 : -1));
+      if (allDates.length >= 2) {
+        const [currentDate, priorDate] = allDates;
+        const ids = [...allRosteredIds];
+        // Supabase's `.in()` filter performs well up to a few hundred
+        // values. We chunk in case a future giant league pushes past
+        // that — 12 teams × 25 roster spots = 300 today, comfortably under.
+        const { data: hist } = await sb
+          .from("dpv_history")
+          .select("player_id, snapshot_date, dpv")
+          .eq("scoring_format", league.scoring_format)
+          .in("snapshot_date", [currentDate, priorDate])
+          .in("player_id", ids);
+        const rows = (hist ?? []) as {
+          player_id: string;
+          snapshot_date: string;
+          dpv: number;
+        }[];
+        const cur = new Map<string, number>();
+        const prior = new Map<string, number>();
+        for (const r of rows) {
+          if (r.snapshot_date === currentDate) cur.set(r.player_id, r.dpv);
+          else if (r.snapshot_date === priorDate) prior.set(r.player_id, r.dpv);
+        }
+        let worstPid: string | null = null;
+        let worstDelta = 0;
+        for (const pid of allRosteredIds) {
+          const c = cur.get(pid);
+          const p = prior.get(pid);
+          if (c === undefined || p === undefined) continue;
+          const d = c - p;
+          if (d < worstDelta) {
+            worstDelta = d;
+            worstPid = pid;
+          }
+        }
+        if (worstPid !== null) {
+          const snap = snapMap.get(worstPid);
+          if (snap?.players) {
+            leagueLoser = {
+              name: snap.players.name,
+              position: snap.players.position,
+              ownerName: ownerOfPlayer.get(worstPid) ?? "(unknown)",
+              delta: Math.round(worstDelta),
+              dpv: cur.get(worstPid) ?? Number(snap.dpv),
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // ── Biggest trade in the league this week ──────────────────────
+  // Sleeper transactions API + our PYV map → who won the swap. The
+  // helper handles offseason gracefully (returns null when no recent
+  // trades qualify) so we just check for null at render time.
+  let biggestTrade: DigestLeagueTrade | null = null;
+  {
+    const playerLookup = new Map<
+      string,
+      { name: string; position: string; pyv: number }
+    >();
+    for (const [pid, snap] of snapMap.entries()) {
+      if (!snap.players) continue;
+      playerLookup.set(pid, {
+        name: snap.players.name,
+        position: snap.players.position,
+        pyv: Math.round(Number(snap.dpv)),
+      });
+    }
+    const summary = await findBiggestRecentTrade(league.league_id, playerLookup);
+    if (summary && summary.winnerRosterId !== null) {
+      const winnerName =
+        rosters.find((r) => r.roster_id === summary.winnerRosterId)
+          ?.owner_display_name ?? `Team ${summary.winnerRosterId}`;
+      const loserName =
+        summary.loserRosterId !== null
+          ? rosters.find((r) => r.roster_id === summary.loserRosterId)
+              ?.owner_display_name ?? `Team ${summary.loserRosterId}`
+          : "(unknown)";
+      biggestTrade = {
+        totalPyvSwapped: summary.totalPyvSwapped,
+        winnerOwner: winnerName,
+        winnerNetPyv: summary.winnerNetPyv,
+        winnerReceived: summary.winnerReceived.map((p) => ({
+          name: p.name,
+          position: p.position,
+          pyv: Math.round(p.pyv),
+        })),
+        winnerSent: summary.winnerSent.map((p) => ({
+          name: p.name,
+          position: p.position,
+          pyv: Math.round(p.pyv),
+        })),
+        loserOwner: loserName,
+      };
+    }
+  }
+
   // ── Trade partners at our weakest position ──────────────────────
   // Other rosters with above-average PYV at our weakest position get
   // listed with their top 2-3 players at that slot. Useful even when
@@ -620,8 +758,9 @@ async function loadOneLeague(
       topRisers,
       topFallers,
       tradePartners,
+      biggestTrade,
+      leagueLoser,
       topSells,
-      topTrades: tradeIdeas,
     },
   };
 }

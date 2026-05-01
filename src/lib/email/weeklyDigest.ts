@@ -12,7 +12,6 @@
 // CSS pruning. The CTA button is a wide <a> with inline styles.
 
 import type { SellWindow } from "@/lib/dpv/sellWindow";
-import type { TradeIdea } from "@/lib/league/tradeFinder";
 import type { ReportCard } from "@/lib/league/reportCard";
 
 export type DigestPlayer = {
@@ -58,6 +57,38 @@ export type DigestTradePartner = {
   surplusPct: number;
 };
 
+// Biggest trade that happened in the league this week, with PYV-
+// based winner attribution. Computed from Sleeper transactions +
+// our PYV map. Null when no qualifying trade exists in the window.
+export type DigestLeagueTrade = {
+  /** Total PYV that crossed sides — proxy for "size" of the trade. */
+  totalPyvSwapped: number;
+  /** Winner display name (resolved from roster_id at digest build time). */
+  winnerOwner: string;
+  /** Net PYV the winner gained beyond what they gave up. */
+  winnerNetPyv: number;
+  /** Player names the winner received. */
+  winnerReceived: { name: string; position: string; pyv: number }[];
+  /** Player names the winner sent. */
+  winnerSent: { name: string; position: string; pyv: number }[];
+  /** Loser display name. */
+  loserOwner: string;
+};
+
+// League-wide biggest PYV drop this week. Surfaces a player on any
+// roster (not just the user's) so the digest doubles as league
+// gossip — useful market-watch signal.
+export type DigestLeagueLoser = {
+  name: string;
+  position: string;
+  /** Owner of the rostered player (display name). */
+  ownerName: string;
+  /** Signed delta — always negative for this entry by definition. */
+  delta: number;
+  /** Current PYV. */
+  dpv: number;
+};
+
 export type DigestLeague = {
   leagueId: string;
   leagueName: string;
@@ -76,10 +107,12 @@ export type DigestLeague = {
   topFallers?: DigestMover[];
   /** Up to 3 rosters with surplus at the user's weakest position. */
   tradePartners?: DigestTradePartner[];
+  /** Biggest trade that happened in the league this week, if any. */
+  biggestTrade?: DigestLeagueTrade | null;
+  /** League-wide biggest PYV drop this week, across all rostered players. */
+  leagueLoser?: DigestLeagueLoser | null;
   /** Up to 3 SELL_NOW or SELL_SOON players on the focused team. */
   topSells: DigestPlayer[];
-  /** Up to 2 trade ideas surfaced by the trade finder. */
-  topTrades: TradeIdea[];
 };
 
 export type DigestInput = {
@@ -267,8 +300,49 @@ function leagueBlockHtml(league: DigestLeague, base: string): string {
         </table>`
       : "";
 
-  // Existing sell + trade rows — kept but moved below the new sections
-  // since the new content is the lead, not the supporting cast.
+  // Trade-target line — replaces the old "Send X → Receive Y" idea
+  // with a higher-signal "go acquire a TE" recommendation. Specific
+  // names live in the trade-partners section above so the rec doesn't
+  // have to repeat them.
+  const tradeTargetRow = league.weakest
+    ? `
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;font-weight:600;margin-top:18px;margin-bottom:4px;">Trade target</div>
+        <p style="margin:0;font-size:13px;color:#18181b;">
+          Look to acquire a <strong>${escapeHtml(league.weakest.position)}</strong>
+          ${
+            league.weakest.deltaPct < 0
+              ? ` — you're <span style="color:#dc2626;font-weight:600;">${Math.abs(league.weakest.deltaPct)}%</span> below league average there.`
+              : "."
+          }
+        </p>`
+    : "";
+
+  // Biggest league trade — only render when one happened in the window.
+  const biggestTradeRow = league.biggestTrade
+    ? `
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;font-weight:600;margin-top:18px;margin-bottom:4px;">Biggest trade in your league</div>
+        <p style="margin:0 0 6px;font-size:13px;color:#18181b;">
+          Winner: <strong>@${escapeHtml(league.biggestTrade.winnerOwner)}</strong>
+          <span style="color:#16a34a;font-weight:600;"> (+${league.biggestTrade.winnerNetPyv} net PYV)</span>
+        </p>
+        <p style="margin:0;font-size:12px;color:#52525b;">
+          Got: ${league.biggestTrade.winnerReceived.map((p) => `${escapeHtml(p.name)} (${p.pyv})`).join(", ")}<br/>
+          Sent: ${league.biggestTrade.winnerSent.map((p) => `${escapeHtml(p.name)} (${p.pyv})`).join(", ")}
+        </p>`
+    : "";
+
+  // League-wide biggest PYV faller — gossip section, signals which
+  // assets are tanking (and on whose roster).
+  const leagueLoserRow = league.leagueLoser
+    ? `
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;font-weight:600;margin-top:18px;margin-bottom:4px;">Biggest PYV drop in your league</div>
+        <p style="margin:0;font-size:13px;color:#18181b;">
+          <strong>${escapeHtml(league.leagueLoser.name)}</strong>
+          <span style="color:#71717a;"> · ${escapeHtml(league.leagueLoser.position)} · @${escapeHtml(league.leagueLoser.ownerName)}</span>
+          <span style="color:#dc2626;font-weight:600;float:right;">${league.leagueLoser.delta} PYV</span>
+        </p>`
+    : "";
+
   const sellRows = league.topSells
     .map(
       (p) => `
@@ -279,19 +353,6 @@ function leagueBlockHtml(league: DigestLeague, base: string): string {
           </td>
           <td style="padding:6px 0;font-size:12px;text-align:right;">
             <span style="display:inline-block;padding:2px 8px;border-radius:4px;background:${toneBg(p.sellWindow.tone)};color:${toneFg(p.sellWindow.tone)};font-weight:600;">${escapeHtml(p.sellWindow.label)}</span>
-          </td>
-        </tr>`,
-    )
-    .join("");
-
-  const tradeRows = league.topTrades
-    .map(
-      (t) => `
-        <tr>
-          <td style="padding:8px 0;font-size:13px;">
-            Send <strong>${escapeHtml(t.give.name)}</strong> →
-            Receive <strong>${escapeHtml(t.receive.name)}</strong>
-            <div style="font-size:11px;color:#71717a;margin-top:2px;">${escapeHtml(t.rationale)}</div>
           </td>
         </tr>`,
     )
@@ -322,18 +383,14 @@ function leagueBlockHtml(league: DigestLeague, base: string): string {
 
           ${positionsRow}
           ${moversRow}
+          ${tradeTargetRow}
           ${tradePartnerRow}
-
-          ${
-            tradeRows
-              ? `<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;font-weight:600;margin-top:18px;margin-bottom:4px;">Top trade idea</div>
-                 <table role="presentation" cellpadding="0" cellspacing="0" width="100%">${tradeRows}</table>`
-              : ""
-          }
+          ${biggestTradeRow}
+          ${leagueLoserRow}
 
           ${
             sellRows
-              ? `<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;font-weight:600;margin-top:14px;margin-bottom:4px;">Sell-window flags</div>
+              ? `<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;font-weight:600;margin-top:18px;margin-bottom:4px;">Sell-window flags</div>
                  <table role="presentation" cellpadding="0" cellspacing="0" width="100%">${sellRows}</table>`
               : ""
           }
@@ -412,13 +469,21 @@ function buildText(args: DigestInput & { greeting: string }): string {
         }
       }
 
+      if (l.weakest) {
+        lines.push("");
+        const pctNote =
+          l.weakest.deltaPct < 0
+            ? ` (${Math.abs(l.weakest.deltaPct)}% below league avg)`
+            : "";
+        lines.push(`Trade target: ${l.weakest.position}${pctNote}`);
+      }
+
       if (
         l.weakest &&
         l.tradePartners &&
         l.tradePartners.length > 0
       ) {
-        lines.push("");
-        lines.push(`Trade partners at ${l.weakest.position}:`);
+        lines.push(`Partners at ${l.weakest.position}:`);
         for (const tp of l.tradePartners) {
           const players = tp.topPlayers
             .map((p) => `${p.name} (${p.dpv})`)
@@ -429,15 +494,24 @@ function buildText(args: DigestInput & { greeting: string }): string {
         }
       }
 
-      if (l.topTrades.length > 0) {
+      if (l.biggestTrade) {
         lines.push("");
-        lines.push("Top trade idea:");
-        for (const t of l.topTrades) {
-          lines.push(
-            `  • Send ${t.give.name} → Receive ${t.receive.name}`,
-          );
-          lines.push(`    ${t.rationale}`);
-        }
+        lines.push(
+          `Biggest trade in your league: @${l.biggestTrade.winnerOwner} won (+${l.biggestTrade.winnerNetPyv} net PYV)`,
+        );
+        lines.push(
+          `  Got:  ${l.biggestTrade.winnerReceived.map((p) => `${p.name} (${p.pyv})`).join(", ")}`,
+        );
+        lines.push(
+          `  Sent: ${l.biggestTrade.winnerSent.map((p) => `${p.name} (${p.pyv})`).join(", ")}`,
+        );
+      }
+
+      if (l.leagueLoser) {
+        lines.push("");
+        lines.push(
+          `Biggest PYV drop in your league: ${l.leagueLoser.name} (${l.leagueLoser.position}, @${l.leagueLoser.ownerName}) ${l.leagueLoser.delta} PYV`,
+        );
       }
 
       if (l.topSells.length > 0) {
