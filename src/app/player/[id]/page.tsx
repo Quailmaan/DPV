@@ -19,6 +19,9 @@ import {
   loadHistoricalBreakdown,
 } from "@/lib/dpv/trajectory";
 import { compareBreakdowns } from "@/lib/dpv/whatChanged";
+import PassingProfileCard, {
+  type PassingProfilePoint,
+} from "@/components/PassingProfileCard";
 import PyvTrendChart, { type TrendPoint } from "@/components/PyvTrendChart";
 import ReceivingProfileCard, {
   type ReceivingProfilePoint,
@@ -214,14 +217,14 @@ export default async function PlayerPage({
     // has a breakdown. Returns null until at least one historical row
     // has been written with the breakdown column populated.
     loadHistoricalBreakdown(sb, id, fmt, 30),
-    // Per-season aDOT + YAC + EPA-per-opportunity history. Drives
-    // the Pro-tier ReceivingProfileCard (WR/TE) and RushingProfileCard
-    // (RB). Sorted ascending so the chart axis reads left-to-right
-    // oldest→newest.
+    // Per-season EPA-per-opportunity + receiving profile history.
+    // Drives all three Pro profile cards: ReceivingProfileCard (WR/TE),
+    // RushingProfileCard (RB), and PassingProfileCard (QB). Sorted
+    // ascending so the chart axis reads left-to-right oldest→newest.
     sb
       .from("player_advanced_stats")
       .select(
-        "season, avg_adot, yac_per_reception, targets, receptions, rushing_epa_per_carry, carries",
+        "season, avg_adot, yac_per_reception, targets, receptions, rushing_epa_per_carry, carries, passing_epa_per_dropback, dropbacks",
       )
       .eq("player_id", id)
       .order("season", { ascending: true }),
@@ -768,9 +771,26 @@ export default async function PlayerPage({
       {/* Position-specific Pro profile cards. Each component hides
           itself if there's no qualifying-sample season, so the
           position gate here is purely about which metric set is
-          relevant — receiving for WR/TE, rushing for RB. QBs get
-          neither for now (passing-EPA trend lives in the breakdown
-          column already; a dedicated card would duplicate signal). */}
+          relevant — passing for QB, rushing for RB, receiving for
+          WR/TE. */}
+      {player.position === "QB" && (
+        <PassingProfileCard
+          isPro={isPro}
+          points={
+            ((advancedRes.data ?? []) as Array<{
+              season: number;
+              passing_epa_per_dropback: number | null;
+              dropbacks: number | null;
+            }>).map(
+              (r): PassingProfilePoint => ({
+                season: r.season,
+                epaPerDropback: r.passing_epa_per_dropback,
+                dropbacks: r.dropbacks ?? 0,
+              }),
+            )
+          }
+        />
+      )}
       {(player.position === "WR" || player.position === "TE") && (
         <ReceivingProfileCard
           isPro={isPro}
