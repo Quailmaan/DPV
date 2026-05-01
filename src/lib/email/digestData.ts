@@ -621,26 +621,40 @@ async function loadOneLeague(
       ].sort((a, b) => (a < b ? 1 : -1));
       if (allDates.length >= 2) {
         const [currentDate, priorDate] = allDates;
-        const ids = [...allRosteredIds];
-        // Supabase's `.in()` filter performs well up to a few hundred
-        // values. We chunk in case a future giant league pushes past
-        // that — 12 teams × 25 roster spots = 300 today, comfortably under.
-        const { data: hist } = await sb
-          .from("dpv_history")
-          .select("player_id, snapshot_date, dpv")
-          .eq("scoring_format", league.scoring_format)
-          .in("snapshot_date", [currentDate, priorDate])
-          .in("player_id", ids);
-        const rows = (hist ?? []) as {
+        // Don't filter by player_id at the query layer. With 12 teams ×
+        // ~25 roster spots ≈ 300 ids, Supabase's `.in()` URL-based
+        // filter can quietly exceed the request URL length limit and
+        // silently return zero rows (no thrown error). Pulling all
+        // rows for the two dates and filtering to allRosteredIds in
+        // memory is ~600 rows × 2 dates = 1.2k rows, well inside
+        // Supabase's default 1000-row page when split per date.
+        const [curRes, priorRes] = await Promise.all([
+          sb
+            .from("dpv_history")
+            .select("player_id, dpv")
+            .eq("scoring_format", league.scoring_format)
+            .eq("snapshot_date", currentDate),
+          sb
+            .from("dpv_history")
+            .select("player_id, dpv")
+            .eq("scoring_format", league.scoring_format)
+            .eq("snapshot_date", priorDate),
+        ]);
+        const curRows = (curRes.data ?? []) as {
           player_id: string;
-          snapshot_date: string;
+          dpv: number;
+        }[];
+        const priorRows = (priorRes.data ?? []) as {
+          player_id: string;
           dpv: number;
         }[];
         const cur = new Map<string, number>();
         const prior = new Map<string, number>();
-        for (const r of rows) {
-          if (r.snapshot_date === currentDate) cur.set(r.player_id, r.dpv);
-          else if (r.snapshot_date === priorDate) prior.set(r.player_id, r.dpv);
+        for (const r of curRows) {
+          if (allRosteredIds.has(r.player_id)) cur.set(r.player_id, r.dpv);
+        }
+        for (const r of priorRows) {
+          if (allRosteredIds.has(r.player_id)) prior.set(r.player_id, r.dpv);
         }
         let worstPid: string | null = null;
         let worstDelta = 0;
