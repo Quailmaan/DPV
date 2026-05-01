@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { redirect } from "next/navigation";
+import AuthMarketingPanel from "@/components/AuthMarketingPanel";
 import { getCurrentSession } from "@/lib/auth/session";
 import { PylonWordmark } from "@/components/PylonLogo";
 import GoogleSignInButton from "../GoogleSignInButton";
@@ -10,9 +11,13 @@ export default async function SignUpPage() {
   if (session) redirect("/league");
 
   return (
-    <div className="w-full max-w-md">
-      {/* Same brand block as the login page so signup feels like the
-          natural next step rather than a different screen. */}
+    // Wider container than a typical auth form because we render the
+    // marketing panel beside the form on desktop. Mobile stacks the
+    // form on top and marketing below — the form is what they came for.
+    <div className="w-full max-w-3xl">
+      {/* Brand block — same as the login page so signup feels like the
+          natural next step rather than a different screen. Centered
+          full-width above the two-column area. */}
       <div className="flex flex-col items-center text-center mb-8">
         <Image
           src="/pylon-logo-light.png"
@@ -39,18 +44,26 @@ export default async function SignUpPage() {
         </p>
       </div>
 
-      <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6 shadow-sm">
-        <h1 className="text-lg font-semibold tracking-tight mb-1">
-          Create account
-        </h1>
-        <p className="text-sm text-zinc-500 mb-5">
-          We&apos;ll send a confirmation email. After you verify, you can pick
-          a username.
-        </p>
+      {/* Two-column on desktop: form left, marketing right. The form
+          renders first in the DOM so mobile users (single column) get
+          straight to the action without scrolling past marketing copy
+          they were just shown on the home hero. */}
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6 shadow-sm">
+          <h1 className="text-lg font-semibold tracking-tight mb-1">
+            Create account
+          </h1>
+          <p className="text-sm text-zinc-500 mb-5">
+            We&apos;ll send a confirmation email. After you verify, you can pick
+            a username.
+          </p>
 
-        <GoogleSignInButton next="/welcome" />
-        <Divider />
-        <SignUpForm />
+          <GoogleSignInButton next="/welcome" />
+          <Divider />
+          <SignUpForm />
+        </div>
+
+        <AuthMarketingPanel />
       </div>
     </div>
   );
