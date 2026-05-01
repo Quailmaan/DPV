@@ -1,5 +1,5 @@
 /**
- * Two utilities for the weekly digest in one script:
+ * Three utilities for the weekly digest in one script:
  *
  *   npx tsx scripts/digest-check.ts                   # diagnostic
  *     Prints every email_preferences row so you can see who's
@@ -11,6 +11,13 @@
  *     CRON_SECRET as the bearer token and prints the JSON
  *     summary the route returns. Use to test outside of
  *     Friday 14:00 UTC, or to retry after fixing an opt-in.
+ *
+ *   npx tsx scripts/digest-check.ts --reset @username # clear timestamp
+ *     Nulls last_digest_sent_at for that user so the next --send
+ *     (or the next cron) ignores the 6-day idempotency window.
+ *     Useful when a manual test bumped the timestamp inside the
+ *     6-day window and you want the real Friday email to land.
+ *     Pair with --send to immediately re-fire after reset.
  */
 import { config as dotenvConfig } from "dotenv";
 dotenvConfig({ path: ".env.local" });
@@ -125,8 +132,44 @@ async function manualSend() {
   }
 }
 
+async function resetUser() {
+  const idx = process.argv.indexOf("--reset");
+  const handle = process.argv[idx + 1];
+  if (!handle || handle.startsWith("--")) {
+    console.error(
+      "Usage: npx tsx scripts/digest-check.ts --reset @username",
+    );
+    process.exit(1);
+  }
+  const cleanHandle = handle.replace(/^@/, "");
+  const { data: profile, error: profileErr } = await sb
+    .from("profiles")
+    .select("user_id, username")
+    .ilike("username", cleanHandle)
+    .maybeSingle();
+  if (profileErr) throw profileErr;
+  if (!profile) {
+    console.error(`No profile found for "${cleanHandle}"`);
+    process.exit(1);
+  }
+  const userId = profile.user_id as string;
+  const { error: updErr } = await sb
+    .from("email_preferences")
+    .update({ last_digest_sent_at: null })
+    .eq("user_id", userId);
+  if (updErr) throw updErr;
+  console.log(
+    `Cleared last_digest_sent_at for @${profile.username} (${userId})`,
+  );
+  console.log(
+    "Run with --send next to fire the digest now, or wait for Friday 14:00 UTC.",
+  );
+}
+
+const reset = process.argv.includes("--reset");
 const send = process.argv.includes("--send");
-(send ? manualSend() : diagnose()).catch((e) => {
+const action = reset ? resetUser() : send ? manualSend() : diagnose();
+action.catch((e) => {
   console.error(e);
   process.exit(1);
 });
