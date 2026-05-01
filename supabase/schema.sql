@@ -304,6 +304,53 @@ drop policy if exists "public read combine_stats" on public.combine_stats;
 create policy "public read combine_stats" on public.combine_stats
   for select to anon, authenticated using (true);
 
+-- Per-opportunity efficiency metrics from nflverse weekly stats.
+-- Pylon's existing PYV opportunity score uses raw target/carry shares
+-- (i.e. *how many* opportunities a player got). These EPA-per-opportunity
+-- values capture *how valuable* each opportunity was, independent of
+-- volume — the missing skill signal in the current model. They feed a
+-- new efficiency multiplier in dpv.ts.
+--
+-- aDOT and YAC are receiving-only profile metrics that drive the
+-- Pro-tier sell-window detector: a WR's aDOT contracting (becoming a
+-- possession option) and YAC dropping (losing the breakaway gear) are
+-- both leading indicators of dynasty value decline that show up before
+-- raw fantasy points do.
+--
+-- Position relevance: only the columns matching the player's primary
+-- role are populated (a WR row has receiving_*, the rest stay null).
+-- Sample-size columns (dropbacks/carries/targets/receptions) are kept
+-- so callers can apply a confidence threshold — EPA on a 4-target
+-- sample is noise.
+create table if not exists public.player_advanced_stats (
+  player_id text not null references public.players(player_id) on delete cascade,
+  season int not null,
+  -- Per-attempt efficiency. Position-specific: only one is meaningful
+  -- per row, but we permit all three because some players cross roles
+  -- (e.g. Taysom Hill, Cordarrelle Patterson).
+  passing_epa_per_dropback numeric,
+  rushing_epa_per_carry numeric,
+  receiving_epa_per_target numeric,
+  -- Receiving usage profile. Driving the Pro sell-window flags.
+  avg_adot numeric,
+  yac_per_reception numeric,
+  -- Sample sizes. Below position-specific minimums we treat efficiency
+  -- as neutral (1.0x multiplier) downstream rather than amplify noise.
+  dropbacks int default 0,
+  carries int default 0,
+  targets int default 0,
+  receptions int default 0,
+  updated_at timestamptz default now(),
+  primary key (player_id, season)
+);
+
+create index if not exists idx_advanced_stats_season on public.player_advanced_stats(season);
+
+alter table public.player_advanced_stats enable row level security;
+drop policy if exists "public read player_advanced_stats" on public.player_advanced_stats;
+create policy "public read player_advanced_stats" on public.player_advanced_stats
+  for select to anon, authenticated using (true);
+
 -- ============================================================
 -- RLS
 -- ============================================================

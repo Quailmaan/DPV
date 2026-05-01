@@ -530,6 +530,140 @@ def ingest_team_context(seasons: list[int]) -> None:
     batched_upsert("team_seasons", rows, on_conflict="team,season")
 
 
+def ingest_advanced_stats(seasons: list[int]) -> None:
+    """EPA per opportunity + aDOT + YAC, aggregated from weekly stats.
+
+    Pylon's existing seasonal aggregates (player_seasons) capture *volume*
+    — yards, TDs, target share. These advanced-stats rows capture
+    *efficiency* — EPA per dropback / carry / target — which is the
+    skill signal independent of opportunity. The PYV efficiency
+    multiplier in dpv.ts reads this table.
+
+    aDOT and YAC are receiving-only profile metrics that drive the
+    Pro-tier sell-window detector. We compute and store them here so
+    later UI charts can plot per-season trends.
+
+    Re-fetches the same weekly parquets that ingest_seasons reads. We
+    accept the redundant fetch (costs a few hundred MB transfer) over
+    refactoring the existing function to expose its weekly DataFrame.
+    Network is fast, downloads cache locally, and the simpler boundary
+    is worth more than the saved bytes.
+    """
+    print("Computing advanced (EPA, aDOT, YAC)...")
+    frames = []
+    for y in seasons:
+        try:
+            w = fetch_weekly(y)
+            w["_season"] = y
+            frames.append(w)
+            print(f"  {y} weekly: {len(w)} rows")
+        except Exception as e:
+            print(f"  {y} weekly: FAILED ({e})")
+    if not frames:
+        print("  no weekly data; skipping advanced stats")
+        return
+    weekly = pd.concat(frames, ignore_index=True)
+
+    if "season" not in weekly.columns:
+        weekly["season"] = weekly["_season"]
+    if "position" not in weekly.columns and "position_group" in weekly.columns:
+        weekly["position"] = weekly["position_group"]
+    weekly = weekly[weekly["position"].isin(POSITIONS)].copy()
+
+    # Defensive: nflverse occasionally renames columns between schema
+    # versions, and not every column we want is guaranteed in older
+    # seasons. Resolve each one with a fallback chain and zero-fill.
+    def col(name: str, fallbacks: list[str] | None = None) -> pd.Series:
+        candidates = [name] + (fallbacks or [])
+        for c in candidates:
+            if c in weekly.columns:
+                return pd.to_numeric(weekly[c], errors="coerce").fillna(0)
+        return pd.Series([0.0] * len(weekly), index=weekly.index)
+
+    weekly["_dropbacks"] = col("dropbacks", ["attempts"])
+    weekly["_passing_epa"] = col("passing_epa")
+    weekly["_carries"] = col("carries")
+    weekly["_rushing_epa"] = col("rushing_epa")
+    weekly["_targets"] = col("targets")
+    weekly["_receptions"] = col("receptions")
+    weekly["_receiving_epa"] = col("receiving_epa")
+    weekly["_receiving_air_yards"] = col("receiving_air_yards")
+    weekly["_receiving_yac"] = col("receiving_yards_after_catch")
+
+    season_agg = (
+        weekly.groupby(["player_id", "season"])
+        .agg(
+            dropbacks=("_dropbacks", "sum"),
+            passing_epa=("_passing_epa", "sum"),
+            carries=("_carries", "sum"),
+            rushing_epa=("_rushing_epa", "sum"),
+            targets=("_targets", "sum"),
+            receptions=("_receptions", "sum"),
+            receiving_epa=("_receiving_epa", "sum"),
+            receiving_air_yards=("_receiving_air_yards", "sum"),
+            receiving_yac=("_receiving_yac", "sum"),
+        )
+        .reset_index()
+    )
+
+    existing_ids = {p["player_id"] for p in fetch_all_rows("players", "player_id")}
+    print(f"  {len(existing_ids)} eligible player IDs in DB")
+
+    rows = []
+    for _, r in season_agg.iterrows():
+        pid = r["player_id"]
+        if pid not in existing_ids:
+            continue
+        season = int(r["season"])
+
+        dropbacks = float(r["dropbacks"] or 0)
+        carries = float(r["carries"] or 0)
+        targets = float(r["targets"] or 0)
+        receptions = float(r["receptions"] or 0)
+
+        # Per-opportunity ratios. Null when the denominator is zero so
+        # downstream callers can distinguish "no data" from "actual zero
+        # EPA per opportunity" (the latter being unusual but valid).
+        passing_eff = (
+            round(float(r["passing_epa"]) / dropbacks, 4) if dropbacks > 0 else None
+        )
+        rushing_eff = (
+            round(float(r["rushing_epa"]) / carries, 4) if carries > 0 else None
+        )
+        receiving_eff = (
+            round(float(r["receiving_epa"]) / targets, 4) if targets > 0 else None
+        )
+        adot = (
+            round(float(r["receiving_air_yards"]) / targets, 2)
+            if targets > 0
+            else None
+        )
+        yac_per_rec = (
+            round(float(r["receiving_yac"]) / receptions, 2)
+            if receptions > 0
+            else None
+        )
+
+        rows.append(
+            {
+                "player_id": pid,
+                "season": season,
+                "passing_epa_per_dropback": passing_eff,
+                "rushing_epa_per_carry": rushing_eff,
+                "receiving_epa_per_target": receiving_eff,
+                "avg_adot": adot,
+                "yac_per_reception": yac_per_rec,
+                "dropbacks": int(dropbacks),
+                "carries": int(carries),
+                "targets": int(targets),
+                "receptions": int(receptions),
+            }
+        )
+
+    print(f"  {len(rows)} player-season advanced rows")
+    batched_upsert("player_advanced_stats", rows, on_conflict="player_id,season")
+
+
 FC_BASE = "https://api.fantasycalc.com/values/current"
 FC_FORMATS = {
     "STANDARD": {"isDynasty": "true", "numQbs": "1", "ppr": "0"},
@@ -607,6 +741,7 @@ def main() -> None:
     ingest_seasons(SEASONS)
     ingest_snaps(SEASONS, pfr_to_gsis)
     ingest_team_context(SEASONS)
+    ingest_advanced_stats(SEASONS)
     ingest_market_values(sleeper_to_gsis)
     print("Done.")
 
