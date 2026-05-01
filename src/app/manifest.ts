@@ -23,7 +23,17 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Pylon",
     description:
       "Data-driven dynasty fantasy football values with historical comps and market calibration.",
-    start_url: "/",
+    // start_url MUST resolve to a 200 for Chrome's installability check.
+    // The site is members-only, so "/" 307-redirects unauthenticated
+    // visitors to /login — which is exactly what Chrome's headless
+    // install-eligibility crawl experiences. That redirect was making
+    // the install option disappear from Chrome's menu entirely.
+    //
+    // /login itself returns 200 for logged-out users and server-side
+    // redirects logged-in users to /league, so installed launches
+    // still land on a useful page either way without a client-side
+    // bounce.
+    start_url: "/login",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
