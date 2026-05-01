@@ -58,6 +58,18 @@ const STEPS: Step[] = [
     note: "NFL combine + pro-day measurables → athleticism_score",
   },
   {
+    name: "sync-nflverse-draft",
+    cmd: TSX[0],
+    args: [TSX[1], "scripts/sync-nflverse-draft.ts"],
+    note: "Pull actual draft results for the incoming class from nflverse — replaces speculative seed entries with ground truth (no-op pre-draft each year, ground truth post-draft)",
+  },
+  {
+    name: "ingest-prospects",
+    cmd: TSX[0],
+    args: [TSX[1], "scripts/ingest-prospects.ts", "data/prospects.csv"],
+    note: "Upsert manually-curated prospect rows from data/prospects.csv into the prospects table — required so commits to the CSV (e.g. adding a new mock-draft source) flow through to the rookies page automatically",
+  },
+  {
     name: "compute-prospect-consensus",
     cmd: TSX[0],
     args: [TSX[1], "scripts/compute-prospect-consensus.ts"],

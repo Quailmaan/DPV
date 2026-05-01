@@ -15,8 +15,8 @@
  * just upsert with the latest data and produce the same CSV state.
  *
  * Usage:
- *   npx tsx scripts/sync-nflverse-draft.ts            # default 2026
- *   npx tsx scripts/sync-nflverse-draft.ts 2027       # other years
+ *   npx tsx scripts/sync-nflverse-draft.ts            # default = INCOMING_CLASS_YEAR (= CURRENT_SEASON + 1)
+ *   npx tsx scripts/sync-nflverse-draft.ts 2027       # explicit year override
  *
  * After running:
  *   npx tsx scripts/compute-prospect-consensus.ts
@@ -29,6 +29,7 @@ dotenvConfig();
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
+import { CURRENT_SEASON } from "../src/lib/dpv/constants";
 
 const NFLVERSE_URL =
   "https://github.com/nflverse/nflverse-data/releases/download/draft_picks/draft_picks.csv";
@@ -75,7 +76,12 @@ type ProspectRow = {
 
 async function main() {
   const yearArg = process.argv[2];
-  const draftYear = yearArg ? parseInt(yearArg, 10) : 2026;
+  // Default to the incoming class — the next NFL Draft after the most
+  // recently completed season. In automation this means the script
+  // pulls last spring's draft results year-round; once that draft has
+  // happened in late April, the data is in nflverse and we get ground
+  // truth. Pre-draft, the script logs "no picks found" and exits clean.
+  const draftYear = yearArg ? parseInt(yearArg, 10) : CURRENT_SEASON + 1;
   if (!Number.isFinite(draftYear)) {
     console.error(`Invalid year: ${yearArg}`);
     process.exit(1);

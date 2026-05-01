@@ -1,6 +1,43 @@
 import type { Position, ScoringFormat, QBTier, QBTransition } from "./types";
 
-export const CURRENT_SEASON = 2025;
+// Most recently COMPLETED NFL season. Auto-derived from the calendar
+// so the pipeline doesn't need a manual annual bump (which would
+// silently corrupt rookie filtering, BPS recency windows, and the
+// asOfSeason logic until someone noticed).
+//
+// NFL seasons are named by their starting year — "the 2025 season"
+// runs Sept 2025 → Feb 2026, ending with the Super Bowl. So:
+//
+//   Mar Y-Dec Y → CURRENT_SEASON = Y - 1
+//                 (Y-1 just ended its Feb SB; Y season may be in
+//                  progress but isn't complete)
+//   Jan Y-Feb Y → CURRENT_SEASON = Y - 2
+//                 (Y-1 season's playoffs ongoing; most recent
+//                  COMPLETED is Y-2)
+//
+// March 1 is the cutoff because Super Bowl is in early-to-mid Feb
+// and we want a clean transition that doesn't depend on the SB date.
+// In the week of the SB, CURRENT_SEASON briefly lags the intuitive
+// answer for a few days — no downstream consumer is affected since
+// the most-recently-completed season's data is fully ingested either
+// way.
+//
+// Override via DPV_CURRENT_SEASON env var for backfills, repro, or
+// season-boundary edge cases.
+function deriveCurrentSeason(): number {
+  const env = process.env.DPV_CURRENT_SEASON;
+  if (env) {
+    const n = parseInt(env, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth() + 1; // 1-12
+  if (month >= 3) return year - 1;
+  return year - 2;
+}
+
+export const CURRENT_SEASON = deriveCurrentSeason();
 
 // Per-season trust factor based on games played. 15-17 = treated as a full
 // year (random 1-2 game injuries shouldn't punish a healthy year). Below
