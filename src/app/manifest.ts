@@ -62,5 +62,32 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: "maskable",
       },
     ],
+    // Screenshots fed to Chrome's "Richer PWA Install UI" — the dialog
+    // that shows preview cards alongside the icon when users hit
+    // Install. Without these, Chrome falls back to the basic install
+    // dialog (icon + name only) and DevTools logs a warning. We need
+    // at least one entry per form_factor for the rich UI to apply
+    // on both desktop and mobile install paths.
+    //
+    // Both images are synthesized from SVG via
+    // scripts/generate-pwa-screenshots.ts so they're version-controlled
+    // alongside the design and re-runnable when copy or branding
+    // changes — no Playwright/Puppeteer dev dep required.
+    screenshots: [
+      {
+        src: "/screenshots/wide.png",
+        sizes: "1280x720",
+        type: "image/png",
+        form_factor: "wide",
+        label: "Pylon dynasty rankings — desktop",
+      },
+      {
+        src: "/screenshots/narrow.png",
+        sizes: "1080x1920",
+        type: "image/png",
+        form_factor: "narrow",
+        label: "Pylon dynasty rankings — mobile",
+      },
+    ],
   };
 }
