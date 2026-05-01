@@ -39,7 +39,13 @@ import {
   type RosterInput,
 } from "@/lib/league/reportCard";
 import type { ScoringFormat } from "@/lib/dpv/types";
-import type { DigestLeague, DigestPlayer } from "./weeklyDigest";
+import type {
+  DigestLeague,
+  DigestMover,
+  DigestPlayer,
+  DigestPositionRank,
+  DigestTradePartner,
+} from "./weeklyDigest";
 
 type LeagueRow = {
   league_id: string;
@@ -464,12 +470,156 @@ async function loadOneLeague(
     };
   }
 
+  // ── Composite rank within the league ────────────────────────────
+  // 1 = highest composite. Ties resolve by roster_id for stability.
+  const cardRank =
+    [...cards]
+      .sort((a, b) => b.composite - a.composite || a.rosterId - b.rosterId)
+      .findIndex((c) => c.rosterId === focusedRoster.roster_id) + 1;
+
+  // ── Position strength: rank our roster at each position ────────
+  // Sort all summaries by byPos[pos] descending; our index + 1 is the
+  // rank. Surplus pct vs league-wide avg quantifies "how strong/weak."
+  const positions: Array<"QB" | "RB" | "WR" | "TE"> = ["QB", "RB", "WR", "TE"];
+  const positionRanks: DigestPositionRank[] = positions.map((pos) => {
+    const sorted = [...summaries].sort(
+      (a, b) => b.byPos[pos] - a.byPos[pos] || a.rosterId - b.rosterId,
+    );
+    const rank =
+      sorted.findIndex((s) => s.rosterId === focusedRoster.roster_id) + 1;
+    const my =
+      summaries.find((s) => s.rosterId === focusedRoster.roster_id)?.byPos[
+        pos
+      ] ?? 0;
+    const avg = leaguePosAvg[pos];
+    // Avoid divide-by-zero when a brand-new league has no data yet.
+    const deltaPct = avg > 0 ? Math.round(((my - avg) / avg) * 100) : 0;
+    return {
+      position: pos,
+      rank,
+      totalRosters: summaries.length,
+      pyv: Math.round(my),
+      deltaPct,
+    };
+  });
+  // Strongest = lowest rank number; weakest = highest. Tie-break by
+  // |deltaPct| so a tied rank still picks the more meaningful position.
+  const strongest = [...positionRanks].sort(
+    (a, b) => a.rank - b.rank || b.deltaPct - a.deltaPct,
+  )[0];
+  const weakest = [...positionRanks].sort(
+    (a, b) => b.rank - a.rank || a.deltaPct - b.deltaPct,
+  )[0];
+
+  // ── Week-over-week movers on the focused roster ─────────────────
+  // Pull the user's roster's history rows for the last ~10 days,
+  // pick the most recent two distinct snapshot_dates, compute deltas.
+  // Empty returns when dpv_history hasn't accumulated two snapshots yet
+  // (brand-new account / cold start) — UI gracefully omits the section.
+  const focusedPlayerIds = focusedRoster.player_ids;
+  let topRisers: DigestMover[] = [];
+  let topFallers: DigestMover[] = [];
+  if (focusedPlayerIds.length > 0) {
+    const tenDaysAgo = new Date(
+      Date.now() - 10 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { data: histRows } = await sb
+      .from("dpv_history")
+      .select("player_id, snapshot_date, dpv")
+      .eq("scoring_format", league.scoring_format)
+      .gte("snapshot_date", tenDaysAgo.slice(0, 10))
+      .in("player_id", focusedPlayerIds)
+      .order("snapshot_date", { ascending: false });
+    type HistRow = {
+      player_id: string;
+      snapshot_date: string;
+      dpv: number;
+    };
+    const hist = (histRows ?? []) as HistRow[];
+
+    // Find the two most recent distinct dates available across the set.
+    const datesDesc = [...new Set(hist.map((r) => r.snapshot_date))].sort(
+      (a, b) => (a < b ? 1 : -1),
+    );
+    if (datesDesc.length >= 2) {
+      const [currentDate, priorDate] = datesDesc;
+      const byPlayerCurrent = new Map<string, number>();
+      const byPlayerPrior = new Map<string, number>();
+      for (const r of hist) {
+        if (r.snapshot_date === currentDate) {
+          byPlayerCurrent.set(r.player_id, Number(r.dpv));
+        } else if (r.snapshot_date === priorDate) {
+          byPlayerPrior.set(r.player_id, Number(r.dpv));
+        }
+      }
+      const movers: DigestMover[] = [];
+      for (const pid of focusedPlayerIds) {
+        const cur = byPlayerCurrent.get(pid);
+        const prior = byPlayerPrior.get(pid);
+        if (cur === undefined || prior === undefined) continue;
+        const snap = snapMap.get(pid);
+        if (!snap || !snap.players) continue;
+        const delta = cur - prior;
+        if (delta === 0) continue;
+        movers.push({
+          name: snap.players.name,
+          position: snap.players.position,
+          dpv: cur,
+          delta,
+        });
+      }
+      topRisers = movers
+        .filter((m) => m.delta > 0)
+        .sort((a, b) => b.delta - a.delta)
+        .slice(0, 3);
+      topFallers = movers
+        .filter((m) => m.delta < 0)
+        .sort((a, b) => a.delta - b.delta)
+        .slice(0, 3);
+    }
+  }
+
+  // ── Trade partners at our weakest position ──────────────────────
+  // Other rosters with above-average PYV at our weakest position get
+  // listed with their top 2-3 players at that slot. Useful even when
+  // findTrades only returns 0-1 ideas (low-confidence weeks) — the
+  // user still sees who to message.
+  const tradePartners: DigestTradePartner[] = (() => {
+    const targetPos = weakest.position;
+    const avg = leaguePosAvg[targetPos];
+    const partners: DigestTradePartner[] = [];
+    for (const other of others) {
+      const otherPyv = other.byPos[targetPos];
+      if (avg <= 0 || otherPyv <= avg * 1.05) continue; // need real surplus
+      const otherPlayers = other.players
+        .filter((p) => p.position === targetPos)
+        .sort((a, b) => b.dpv - a.dpv)
+        .slice(0, 3)
+        .map((p) => ({ name: p.name, dpv: Math.round(p.dpv) }));
+      if (otherPlayers.length === 0) continue;
+      partners.push({
+        ownerName: other.ownerName,
+        topPlayers: otherPlayers,
+        surplusPct: Math.round(((otherPyv - avg) / avg) * 100),
+      });
+    }
+    return partners
+      .sort((a, b) => b.surplusPct - a.surplusPct)
+      .slice(0, 3);
+  })();
+
   return {
     kind: "ok",
     league: {
       leagueId: league.league_id,
       leagueName: league.name,
       card: { composite: myCard.composite, verdict: myCard.verdict },
+      cardRank,
+      strongest,
+      weakest,
+      topRisers,
+      topFallers,
+      tradePartners,
       topSells,
       topTrades: tradeIdeas,
     },
