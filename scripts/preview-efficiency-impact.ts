@@ -105,7 +105,34 @@ async function fetchAll<T>(
 // Recompute the final normalized DPV given an alternate efficiency
 // multiplier. Reverse-engineers projectedPPG and market value from
 // the stored breakdown, then re-runs the modifier chain.
-function recompute(b: Breakdown, oldEff: number, newEff: number): number {
+//
+// Returns null when the breakdown is missing fields needed for the
+// reversal (older dpv_snapshots rows pre-date the current shape).
+// Caller skips those players from the diff — better than letting
+// NaN values silently poison subsequent rank sorts.
+function recompute(
+  b: Breakdown,
+  oldEff: number,
+  newEff: number,
+): number | null {
+  // Strict input validation. ANY non-finite stored field means we
+  // can't trust the math downstream — drop and let the caller skip.
+  if (
+    !b ||
+    !Number.isFinite(b.dpvRaw) ||
+    !Number.isFinite(b.dpvProjected) ||
+    !Number.isFinite(b.dpvFinal) ||
+    !Number.isFinite(b.hsmBlendWeight) ||
+    !Number.isFinite(b.marketBlendWeight) ||
+    !Number.isFinite(b.scarcityMultiplier) ||
+    !Number.isFinite(b.rookieDisplacementMult) ||
+    !Number.isFinite(oldEff) ||
+    oldEff === 0 ||
+    !Number.isFinite(newEff)
+  ) {
+    return null;
+  }
+
   // 1. Apply the efficiency ratio to dpvRaw
   const ratio = newEff / oldEff;
   const newDpvRaw = b.dpvRaw * ratio;
@@ -118,6 +145,7 @@ function recompute(b: Breakdown, oldEff: number, newEff: number): number {
   } else {
     const projectedPPG =
       (b.dpvProjected - b.dpvRaw * b.hsmBlendWeight) / (1 - b.hsmBlendWeight);
+    if (!Number.isFinite(projectedPPG)) return null;
     newDpvProjected =
       newDpvRaw * b.hsmBlendWeight + projectedPPG * (1 - b.hsmBlendWeight);
   }
@@ -127,8 +155,8 @@ function recompute(b: Breakdown, oldEff: number, newEff: number): number {
   // displacement), not the pre-scarcity blend output. Strip the scaling
   // back to recover dpvFinal_pre_scarcity, then reverse the blend.
   const scarcityScale = b.scarcityMultiplier * b.rookieDisplacementMult;
-  const dpvFinalPreScarcity =
-    scarcityScale > 0 ? b.dpvFinal / scarcityScale : b.dpvFinal;
+  if (scarcityScale <= 0) return null;
+  const dpvFinalPreScarcity = b.dpvFinal / scarcityScale;
 
   let newDpvFinalPreScarcity: number;
   if (b.marketBlendWeight <= 1e-9) {
@@ -137,6 +165,7 @@ function recompute(b: Breakdown, oldEff: number, newEff: number): number {
     const market =
       (dpvFinalPreScarcity - b.dpvProjected * (1 - b.marketBlendWeight)) /
       b.marketBlendWeight;
+    if (!Number.isFinite(market)) return null;
     newDpvFinalPreScarcity =
       newDpvProjected * (1 - b.marketBlendWeight) +
       market * b.marketBlendWeight;
@@ -144,7 +173,11 @@ function recompute(b: Breakdown, oldEff: number, newEff: number): number {
 
   // 4. Re-apply scarcity scaling and normalize.
   const scaled = newDpvFinalPreScarcity * scarcityScale;
-  return Math.max(0, Math.min(DPV_MAX, Math.round(scaled * DPV_SCALE_CONSTANT)));
+  if (!Number.isFinite(scaled)) return null;
+  return Math.max(
+    0,
+    Math.min(DPV_MAX, Math.round(scaled * DPV_SCALE_CONSTANT)),
+  );
 }
 
 // Pick the position-relevant EPA/opportunity from the most-recent
@@ -229,22 +262,60 @@ async function main() {
     eff: number;
   };
   const computed: Computed[] = [];
+  let skippedNoBreakdown = 0;
+  let skippedRecomputeFailed = 0;
   for (const s of snapshots) {
     const p = playerById.get(s.player_id);
     if (!p) continue;
+    if (!Number.isFinite(s.dpv)) continue;
+
     const eff = effForPlayer(p.position, advByPlayer.get(s.player_id));
 
     let oldDpv: number, newDpv: number;
     if (hasEff) {
-      // Stored DPV used `eff`. Compute what it'd be at 1.0×.
-      const currentEff = s.breakdown.efficiencyMultiplier ?? 1.0;
-      oldDpv = recompute(s.breakdown, currentEff, 1.0);
-      newDpv = s.dpv;
+      const currentEff = s.breakdown?.efficiencyMultiplier ?? 1.0;
+      // Short-circuit when efficiency was effectively 1.0× — removing
+      // it doesn't change anything, and we don't need to risk the
+      // reverse-engineering math on a row whose breakdown might be
+      // partial.
+      if (Math.abs(currentEff - 1.0) < 1e-9) {
+        oldDpv = s.dpv;
+        newDpv = s.dpv;
+      } else {
+        if (!s.breakdown) {
+          skippedNoBreakdown++;
+          continue;
+        }
+        const result = recompute(s.breakdown, currentEff, 1.0);
+        if (result === null) {
+          skippedRecomputeFailed++;
+          continue;
+        }
+        oldDpv = result;
+        newDpv = s.dpv;
+      }
     } else {
-      // Stored DPV used 1.0×. Compute what it'd be at the new eff.
-      oldDpv = s.dpv;
-      newDpv = recompute(s.breakdown, 1.0, eff);
+      // Stored DPV used 1.0×. Short-circuit when the new efficiency
+      // is also 1.0× (most players have no advanced-stats data) so
+      // we don't run the reverse-engineering math unnecessarily.
+      if (Math.abs(eff - 1.0) < 1e-9) {
+        oldDpv = s.dpv;
+        newDpv = s.dpv;
+      } else {
+        if (!s.breakdown) {
+          skippedNoBreakdown++;
+          continue;
+        }
+        oldDpv = s.dpv;
+        const result = recompute(s.breakdown, 1.0, eff);
+        if (result === null) {
+          skippedRecomputeFailed++;
+          continue;
+        }
+        newDpv = result;
+      }
     }
+
     computed.push({
       player_id: s.player_id,
       name: p.name,
@@ -253,6 +324,11 @@ async function main() {
       newDpv,
       eff,
     });
+  }
+  if (skippedNoBreakdown > 0 || skippedRecomputeFailed > 0) {
+    console.log(
+      `Skipped ${skippedNoBreakdown} rows missing breakdown, ${skippedRecomputeFailed} where recompute failed.\n`,
+    );
   }
 
   // Per-position rank within both old and new
