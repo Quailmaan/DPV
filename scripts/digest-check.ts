@@ -1,5 +1,5 @@
 /**
- * Three utilities for the weekly digest in one script:
+ * Four utilities for the weekly digest in one script:
  *
  *   npx tsx scripts/digest-check.ts                   # diagnostic
  *     Prints every email_preferences row so you can see who's
@@ -12,12 +12,16 @@
  *     summary the route returns. Use to test outside of
  *     Friday 14:00 UTC, or to retry after fixing an opt-in.
  *
- *   npx tsx scripts/digest-check.ts --reset @username # clear timestamp
+ *   npx tsx scripts/digest-check.ts --reset @username # clear one user
  *     Nulls last_digest_sent_at for that user so the next --send
  *     (or the next cron) ignores the 6-day idempotency window.
- *     Useful when a manual test bumped the timestamp inside the
- *     6-day window and you want the real Friday email to land.
- *     Pair with --send to immediately re-fire after reset.
+ *
+ *   npx tsx scripts/digest-check.ts --reset-all       # clear everyone
+ *     Same idea but applied to every opted-in user. Use after a
+ *     copy-fix or template change when you want all subscribers
+ *     to receive the updated email immediately. Pair with --send
+ *     (or click Run Now in Vercel) to actually fire the digests.
+ *     Safe to re-run — worst case is one duplicate email per user.
  */
 import { config as dotenvConfig } from "dotenv";
 dotenvConfig({ path: ".env.local" });
@@ -166,9 +170,41 @@ async function resetUser() {
   );
 }
 
+async function resetAll() {
+  // Pull the opted-in user list first so we can report names + count.
+  // Acts as a confirmation: caller sees what they're about to clear.
+  const { data: prefs, error } = await sb
+    .from("email_preferences")
+    .select("user_id, last_digest_sent_at")
+    .eq("weekly_digest_opted_in", true);
+  if (error) throw error;
+  const optedIn = (prefs ?? []) as {
+    user_id: string;
+    last_digest_sent_at: string | null;
+  }[];
+  if (optedIn.length === 0) {
+    console.log("No opted-in users — nothing to reset.");
+    return;
+  }
+  console.log(`Clearing last_digest_sent_at for ${optedIn.length} opted-in users...`);
+  const { error: updErr } = await sb
+    .from("email_preferences")
+    .update({ last_digest_sent_at: null })
+    .eq("weekly_digest_opted_in", true);
+  if (updErr) throw updErr;
+  console.log(`  Done. Run --send (or click Run Now in Vercel) to fire fresh digests to all.`);
+}
+
+const resetAllFlag = process.argv.includes("--reset-all");
 const reset = process.argv.includes("--reset");
 const send = process.argv.includes("--send");
-const action = reset ? resetUser() : send ? manualSend() : diagnose();
+const action = resetAllFlag
+  ? resetAll()
+  : reset
+    ? resetUser()
+    : send
+      ? manualSend()
+      : diagnose();
 action.catch((e) => {
   console.error(e);
   process.exit(1);
