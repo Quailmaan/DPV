@@ -23,6 +23,9 @@ import PyvTrendChart, { type TrendPoint } from "@/components/PyvTrendChart";
 import ReceivingProfileCard, {
   type ReceivingProfilePoint,
 } from "@/components/ReceivingProfileCard";
+import RushingProfileCard, {
+  type RushingProfilePoint,
+} from "@/components/RushingProfileCard";
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: "STANDARD", label: "Standard" },
@@ -212,12 +215,13 @@ export default async function PlayerPage({
     // has been written with the breakdown column populated.
     loadHistoricalBreakdown(sb, id, fmt, 30),
     // Per-season aDOT + YAC + EPA-per-opportunity history. Drives
-    // the Pro-tier ReceivingProfileCard. Sorted ascending so the
-    // chart axis reads left-to-right oldest→newest.
+    // the Pro-tier ReceivingProfileCard (WR/TE) and RushingProfileCard
+    // (RB). Sorted ascending so the chart axis reads left-to-right
+    // oldest→newest.
     sb
       .from("player_advanced_stats")
       .select(
-        "season, avg_adot, yac_per_reception, targets, receptions",
+        "season, avg_adot, yac_per_reception, targets, receptions, rushing_epa_per_carry, carries",
       )
       .eq("player_id", id)
       .order("season", { ascending: true }),
@@ -761,10 +765,12 @@ export default async function PlayerPage({
         </div>
       )}
 
-      {/* Receiving profile (Pro). aDOT + YAC trends are receiving-only
-          metrics, so we hide the section entirely for QB and RB rather
-          than show an empty card. The component itself also hides if
-          there's no qualifying-sample season — guards both ends. */}
+      {/* Position-specific Pro profile cards. Each component hides
+          itself if there's no qualifying-sample season, so the
+          position gate here is purely about which metric set is
+          relevant — receiving for WR/TE, rushing for RB. QBs get
+          neither for now (passing-EPA trend lives in the breakdown
+          column already; a dedicated card would duplicate signal). */}
       {(player.position === "WR" || player.position === "TE") && (
         <ReceivingProfileCard
           isPro={isPro}
@@ -782,6 +788,24 @@ export default async function PlayerPage({
                 yacPerReception: r.yac_per_reception,
                 targets: r.targets ?? 0,
                 receptions: r.receptions ?? 0,
+              }),
+            )
+          }
+        />
+      )}
+      {player.position === "RB" && (
+        <RushingProfileCard
+          isPro={isPro}
+          points={
+            ((advancedRes.data ?? []) as Array<{
+              season: number;
+              rushing_epa_per_carry: number | null;
+              carries: number | null;
+            }>).map(
+              (r): RushingProfilePoint => ({
+                season: r.season,
+                epaPerCarry: r.rushing_epa_per_carry,
+                carries: r.carries ?? 0,
               }),
             )
           }
