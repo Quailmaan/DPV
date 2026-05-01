@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import InstallButton from "./InstallButton";
 
 // Mobile-only nav. The desktop layout already has the inline horizontal
 // nav (`hidden sm:flex` from layout.tsx). On phones we collapse that to
@@ -152,6 +153,16 @@ export default function MobileNav() {
                 );
               })}
             </nav>
+            {/* Install CTA — pinned at the bottom of the sheet so it's
+                always visible without scrolling past the nav links.
+                InstallButton renders null when there's no install path
+                (already installed, or unsupported browser like Firefox
+                desktop), and the `empty:hidden` modifier collapses
+                this whole wrapper — including the border — so the
+                sheet doesn't show an empty bordered box. */}
+            <div className="empty:hidden border-t border-zinc-200 dark:border-zinc-800 px-4 py-3">
+              <InstallButton variant="sheet" />
+            </div>
           </div>
         </div>
       )}

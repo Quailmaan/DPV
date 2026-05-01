@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import Image from "next/image";
 import Link from "next/link";
 import HeaderAuth from "@/components/HeaderAuth";
+import InstallButton from "@/components/InstallButton";
 import MobileNav from "@/components/MobileNav";
 import { PylonWordmark } from "@/components/PylonLogo";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
@@ -165,7 +166,12 @@ export default async function RootLayout({
                     Pricing
                   </Link>
                 </nav>
-                <div className="order-3 ml-auto flex items-center gap-2">
+                <div className="order-3 ml-auto flex items-center gap-3">
+                  {/* Desktop-only "Install" link, hidden on phones (the
+                      MobileNav sheet has the prominent CTA there) and
+                      hidden entirely when the browser doesn't expose an
+                      install path or the app is already installed. */}
+                  <InstallButton variant="compact" />
                   <HeaderAuth />
                   <MobileNav />
                 </div>
