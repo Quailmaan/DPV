@@ -38,6 +38,17 @@ const PUBLIC_PREFIXES = [
   // fail — the user is by definition not authenticating in that state,
   // so it has to be reachable without a session.
   "/offline",
+  // Marketing landing — `/` renders MarketingHero + a teaser rankings
+  // table for signed-out visitors and the full rankings page for
+  // signed-in users. Bouncing every cold visitor straight to /login
+  // (the prior behavior) lost any chance to explain what Pylon is
+  // before asking for credentials. The teaser tables read from
+  // public-RLS-allowed snapshot tables so anon queries succeed.
+  // Note: this is exact-match because PUBLIC_PREFIXES uses
+  // `path === p || path.startsWith(p + "/")` and "/" + "/" = "//"
+  // never matches a real path — so nothing under / is opened up
+  // beyond the root itself.
+  "/",
 ];
 
 export async function middleware(request: NextRequest) {

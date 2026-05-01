@@ -351,6 +351,42 @@ export default async function RankingsPage({
           itemLabel="players"
         />
       )}
+
+      {/* Bottom-of-page closing CTA for signed-out visitors. They've
+          just scrolled through real rankings — the conversion moment
+          is right here, not buried back up in the hero. Signed-in
+          users skip this entirely; it'd be noise on their daily home
+          page. */}
+      {!session && <ClosingCta />}
+    </div>
+  );
+}
+
+function ClosingCta() {
+  return (
+    <div className="mt-10 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 sm:p-8 text-center">
+      <h2 className="text-xl sm:text-2xl font-semibold tracking-tight">
+        Ready to act on these rankings?
+      </h2>
+      <p className="text-sm text-zinc-500 mt-2 max-w-lg mx-auto">
+        Free accounts unlock the full PYV board, rookie rankings, one
+        synced Sleeper league, and the universal trade calculator.
+        Takes about 30 seconds to sign up.
+      </p>
+      <div className="flex flex-wrap gap-2 justify-center mt-5">
+        <Link
+          href="/signup"
+          className="inline-flex items-center text-sm font-medium px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white"
+        >
+          Create free account
+        </Link>
+        <Link
+          href="/login"
+          className="inline-flex items-center text-sm font-medium px-4 py-2 rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
+        >
+          I already have an account
+        </Link>
+      </div>
     </div>
   );
 }
