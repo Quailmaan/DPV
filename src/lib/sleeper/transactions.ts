@@ -17,16 +17,51 @@
 //   - roster_ids: number[]               — rosters involved
 //   - adds: Record<player_id, roster_id> — who got which player
 //   - drops: Record<player_id, roster_id> — original owner per dropped player
-//   - draft_picks: optional, ignored for now (PYV pick valuation is a
-//     separate problem and surfacing trades that include picks without
-//     valuing them would mislead the "winner" verdict)
+//   - draft_picks: array of pick movements — { season, round,
+//     roster_id (new owner), previous_owner_id (old owner) }
 //   - created: epoch milliseconds
 //
-// We only score player-for-player trades. Trades involving picks get
-// flagged but don't compete for "biggest by PYV swap" because their
-// value is incomplete.
+// Picks contribute to PYV scoring via the same round-average curve
+// the trade calculator uses (lib/picks/constants.pickDpv averaged
+// across slots 1-12, since Sleeper trades carry round granularity
+// only — actual draft slot isn't determined until standings finalize).
+// 4th-round and later picks have negligible PYV in our model and
+// are skipped so they don't add noise.
+
+import { currentPickWindow, pickDpv } from "../picks/constants";
 
 const SLEEPER_BASE = "https://api.sleeper.app/v1";
+
+// Average PYV across all 12 slots in a given (year, round). Mirrors
+// the round-level valuation used by the trade calculator and the
+// digest's trade-partners section. No class-strength overrides — the
+// digest doesn't load that data; neutral is acceptable for "biggest
+// trade" scoring since both sides of the trade get the same valuation.
+function pickPyvForRound(season: number, round: 1 | 2 | 3): number {
+  const [base] = currentPickWindow(new Date());
+  let sum = 0;
+  let n = 0;
+  for (let slot = 1; slot <= 12; slot++) {
+    const v = pickDpv(season, round, slot, base);
+    if (v > 0) {
+      sum += v;
+      n++;
+    }
+  }
+  return n > 0 ? Math.round(sum / n) : 0;
+}
+
+type SleeperDraftPick = {
+  // Sleeper sometimes encodes season as a string ("2026"), sometimes
+  // as a number depending on which endpoint you hit. Tolerate both.
+  season: string | number;
+  round: number;
+  // The roster receiving the pick AFTER this trade.
+  roster_id: number;
+  // The roster that owned it BEFORE the trade — i.e. the side sending it.
+  previous_owner_id?: number;
+  owner_id?: number;
+};
 
 type SleeperTransaction = {
   transaction_id: string;
@@ -36,7 +71,7 @@ type SleeperTransaction = {
   roster_ids: number[];
   adds: Record<string, number> | null;
   drops: Record<string, number> | null;
-  draft_picks: unknown[] | null;
+  draft_picks: SleeperDraftPick[] | null;
 };
 
 type NflState = { season: string; week: number; season_type: string };
@@ -130,14 +165,11 @@ export async function findBiggestRecentTrade(
     all.push(...batch);
   }
 
-  // Filter to completed trades within the time window, with no draft
-  // picks involved (we can't value those accurately yet).
+  // Completed trades within the window. Picks are scored via the
+  // round-average curve — most dynasty trades involve at least one
+  // pick, so excluding them would silently hide ~80% of real trades.
   const eligible = all.filter(
-    (t) =>
-      t.type === "trade" &&
-      t.status === "complete" &&
-      t.created >= cutoff &&
-      (!t.draft_picks || t.draft_picks.length === 0),
+    (t) => t.type === "trade" && t.status === "complete" && t.created >= cutoff,
   );
   if (eligible.length === 0) return null;
 
@@ -184,6 +216,32 @@ export async function findBiggestRecentTrade(
       ensure(rid).sent.push(info);
     }
     if (skip) continue;
+
+    // Picks: each draft_picks entry represents one pick changing
+    // hands. Score by the round-average curve (slot is unknown until
+    // standings finalize). Skip rounds outside 1-3 — 4th+ have
+    // negligible PYV in our model.
+    for (const pick of t.draft_picks ?? []) {
+      const season =
+        typeof pick.season === "string"
+          ? parseInt(pick.season, 10)
+          : pick.season;
+      if (!Number.isFinite(season)) continue;
+      if (pick.round < 1 || pick.round > 3) continue;
+      const pyv = pickPyvForRound(season, pick.round as 1 | 2 | 3);
+      if (pyv <= 0) continue;
+      const newOwner = pick.roster_id;
+      const oldOwner = pick.previous_owner_id;
+      if (newOwner === undefined || oldOwner === undefined) continue;
+      const entry = {
+        name: `${season} R${pick.round}`,
+        position: "PICK",
+        pyv,
+      };
+      ensure(newOwner).received.push(entry);
+      ensure(oldOwner).sent.push(entry);
+    }
+
     if (byRoster.size !== 2) continue; // ignore 3-team trades for v1
 
     // Score: each roster's net = received - sent. Total PYV swapped
