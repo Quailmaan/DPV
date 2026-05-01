@@ -34,6 +34,36 @@ love-jeremiyah-2026,WALTERFOOTBALL_CAMPBELL,2026,Jeremiyah Love,RB,98,1,3
 tyson-jordyn-2026,WALTERFOOTBALL_CAMPBELL,2026,Jordyn Tyson,WR,96,1,5
 lemon-makai-2026,WALTERFOOTBALL_CAMPBELL,2026,Makai Lemon,WR,88,1,13
 tate-carnell-2026,WALTERFOOTBALL_CAMPBELL,2026,Carnell Tate,WR,85,1,16
+# 2026 class — PYLON_SEED supplemental list. Hand-curated additions
+# beyond DRAFTTEK's offensive-skill subset (which capped at 28 names)
+# so the rookies page has the 40+ options a 12-team 3-round draft
+# board needs. Names compiled from common consensus boards (Walter
+# Football full top 100, NFL Mock Draft Database aggregate, PFN top
+# 100, ESPN draft tracker). Grades and projected picks here are
+# approximate — refine by adding rows from a specific scout/site
+# under their own source name; cross-source aggregation in
+# compute-prospect-consensus.ts will then average rankings naturally.
+#
+# Each line uses prospect_id format <lastname-firstname-year> to
+# match the existing CSV convention so re-ingest of an authoritative
+# source under a different `source` label correctly aggregates
+# instead of creating duplicates.
+nussmeier-garrett-2026,PYLON_SEED,2026,Garrett Nussmeier,QB,82,1,18
+klubnik-cade-2026,PYLON_SEED,2026,Cade Klubnik,QB,68,2,33
+mateer-john-2026,PYLON_SEED,2026,John Mateer,QB,48,2,52
+haynes-justice-2026,PYLON_SEED,2026,Justice Haynes,RB,82,1,18
+singleton-nick-2026,PYLON_SEED,2026,Nick Singleton,RB,75,1,25
+allen-kaytron-2026,PYLON_SEED,2026,Kaytron Allen,RB,62,2,40
+durham-caden-2026,PYLON_SEED,2026,Caden Durham,RB,55,2,47
+moss-leveon-2026,PYLON_SEED,2026,Le'Veon Moss,RB,50,2,52
+hardy-ahmad-2026,PYLON_SEED,2026,Ahmad Hardy,RB,42,3,63
+washington-bryson-2026,PYLON_SEED,2026,Bryson Washington,RB,35,3,71
+singleton-eric-2026,PYLON_SEED,2026,Eric Singleton Jr.,WR,78,1,22
+anderson-aaron-2026,PYLON_SEED,2026,Aaron Anderson,WR,65,2,36
+williams-kyle-2026,PYLON_SEED,2026,Kyle Williams,WR,57,2,46
+lachey-luke-2026,PYLON_SEED,2026,Luke Lachey,TE,52,2,49
+evans-mitchell-2026,PYLON_SEED,2026,Mitchell Evans,TE,40,3,65
+koziol-tanner-2026,PYLON_SEED,2026,Tanner Koziol,TE,28,3,78
 # 2027 class — NBADraftRoom R1 mock (offensive skill positions filtered)
 manning-arch-2027,NBADRAFTROOM_MOCK,2027,Arch Manning,QB,100,1,1
 moore-dante-2027,NBADRAFTROOM_MOCK,2027,Dante Moore,QB,99,1,2
