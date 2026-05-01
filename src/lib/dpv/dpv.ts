@@ -5,6 +5,7 @@ import {
   marketBlendWeights,
   scarcityMultiplier,
 } from "./constants";
+import { efficiencyMultiplier } from "./efficiency";
 import { hsmBlendWeight, runHSM } from "./hsm";
 import { calculateOpportunityScore } from "./opportunity";
 import {
@@ -66,8 +67,24 @@ export function calculateDPV(input: DPVInput): DPVResult {
   const qbStarterRate = input.qbStarterRateMult ?? 1.0;
   const qbDepthChart = input.qbDepthChartMult ?? 1.0;
 
+  // EPA-per-opportunity efficiency. Defaults to 1.0 (neutral) for
+  // players with no advanced-stats record OR below the MIN_OPPS
+  // sample threshold, so missing data never penalizes a player.
+  // See efficiency.ts for the calibrated band [0.85, 1.15] and the
+  // tanh-scaled position-specific centering.
+  const eff = efficiencyMultiplier(position, input.efficiency);
+
   const dpvRaw =
-    bps * am * os * olqi * qqs * bbcs * sfw * qbStarterRate * qbDepthChart;
+    bps *
+    am *
+    os *
+    olqi *
+    qqs *
+    bbcs *
+    sfw *
+    qbStarterRate *
+    qbDepthChart *
+    eff;
 
   const hsm = runHSM(input);
   const hsmBlend = hsmBlendWeight(hsm.confidence);
@@ -106,6 +123,7 @@ export function calculateDPV(input: DPVInput): DPVResult {
     rookieDisplacementMult: rookieDisplacement,
     qbStarterRateMult: qbStarterRate,
     qbDepthChartMult: qbDepthChart,
+    efficiencyMultiplier: eff,
     dpvRaw,
     dpvProjected,
     dpvFinal: scaled,

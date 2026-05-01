@@ -69,6 +69,14 @@ export interface PrecomputedHSM {
   n3?: number;
 }
 
+// EPA-per-opportunity efficiency input. Lives in efficiency.ts —
+// re-exported here so DPVInput stays single-import. See
+// src/lib/dpv/efficiency.ts for the full multiplier definition.
+export interface EfficiencyInputs {
+  epaPerOpportunity: number | null;
+  opportunities: number;
+}
+
 export interface DPVInput {
   profile: PlayerProfile;
   seasons: SeasonStats[];
@@ -78,6 +86,13 @@ export interface DPVInput {
   marketValueNormalized?: number;
   positionRank?: number;
   precomputedHSM?: PrecomputedHSM;
+  // Per-opportunity EPA from nflverse weekly aggregates
+  // (player_advanced_stats table). Most-recent-season value, which
+  // efficiency.ts converts into a 0.85-1.15 multiplier slotted into
+  // the PYV modifier chain. Optional — players without a record
+  // (rookies pre-debut, depth pieces below MIN_OPPS) get a neutral
+  // 1.0× multiplier and ranking is unaffected.
+  efficiency?: EfficiencyInputs;
   // Pre-computed rookie displacement multiplier (≤ 1.0). Caller resolves
   // team+position rookie threat from the draft-capital curve and passes in.
   // Omit or pass 1.0 when there's no incoming rookie threat.
@@ -120,6 +135,10 @@ export interface DPVBreakdown {
   rookieDisplacementMult: number;
   qbStarterRateMult: number;
   qbDepthChartMult: number;
+  // EPA-per-opportunity multiplier (0.85-1.15). 1.0 when the player
+  // has no advanced-stats record or fell below the MIN_OPPS threshold;
+  // otherwise reflects how skill-efficient their production was.
+  efficiencyMultiplier: number;
   dpvRaw: number;
   dpvProjected: number;
   dpvFinal: number;

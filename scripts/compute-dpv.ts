@@ -274,6 +274,34 @@ async function main() {
   }
   console.log(`  ${combineRows.length} combine rows`);
 
+  console.log("Loading player_advanced_stats...");
+  const advancedRows = await fetchAll<{
+    player_id: string;
+    season: number;
+    passing_epa_per_dropback: number | null;
+    rushing_epa_per_carry: number | null;
+    receiving_epa_per_target: number | null;
+    dropbacks: number | null;
+    carries: number | null;
+    targets: number | null;
+  }>("player_advanced_stats");
+  // Per player: take the most recent season we have advanced data for.
+  // We don't blend across seasons here — most-recent gives cleanest
+  // role/scheme signal, and the MIN_OPPS filter inside efficiencyMultiplier
+  // already drops noisy small-sample years to neutral. Multi-year
+  // smoothing can come later if we observe excessive year-to-year
+  // ranking churn from this signal.
+  const advancedByPlayer = new Map<string, (typeof advancedRows)[number]>();
+  for (const r of advancedRows) {
+    const existing = advancedByPlayer.get(r.player_id);
+    if (!existing || r.season > existing.season) {
+      advancedByPlayer.set(r.player_id, r);
+    }
+  }
+  console.log(
+    `  ${advancedRows.length} rows, ${advancedByPlayer.size} unique players (using most recent season per player)`,
+  );
+
   console.log("Loading prospect_consensus names...");
   const prospectRows = await fetchAll<{ name: string; draft_year: number | null }>(
     "prospect_consensus",
@@ -799,6 +827,29 @@ async function main() {
         ? qbDepthMultByPlayer.get(p.player_id) ?? 1.0
         : 1.0;
 
+    // Pick the position-relevant EPA-per-opportunity from the most
+    // recent advanced-stats row. efficiency.ts gates on opportunities
+    // < MIN_OPPS to neutral, so we don't pre-filter here — pass through
+    // and let the multiplier decide.
+    const adv = advancedByPlayer.get(p.player_id);
+    const efficiency = adv
+      ? p.position === "QB"
+        ? {
+            epaPerOpportunity: adv.passing_epa_per_dropback,
+            opportunities: adv.dropbacks ?? 0,
+          }
+        : p.position === "RB"
+          ? {
+              epaPerOpportunity: adv.rushing_epa_per_carry,
+              opportunities: adv.carries ?? 0,
+            }
+          : {
+              // WR + TE both keyed off receiving production
+              epaPerOpportunity: adv.receiving_epa_per_target,
+              opportunities: adv.targets ?? 0,
+            }
+      : undefined;
+
     for (const fmt of FORMATS) {
       const input: DPVInput = {
         profile: {
@@ -819,6 +870,7 @@ async function main() {
         rookieDisplacementMult,
         qbStarterRateMult,
         qbDepthChartMult,
+        efficiency,
         precomputedHSM: hsmSummary
           ? {
               meanNextPPG: hsmSummary.meanNextPPG,
