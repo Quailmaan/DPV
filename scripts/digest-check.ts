@@ -1,5 +1,5 @@
 /**
- * Four utilities for the weekly digest in one script:
+ * Five utilities for the weekly digest in one script:
  *
  *   npx tsx scripts/digest-check.ts                   # diagnostic
  *     Prints every email_preferences row so you can see who's
@@ -22,6 +22,15 @@
  *     to receive the updated email immediately. Pair with --send
  *     (or click Run Now in Vercel) to actually fire the digests.
  *     Safe to re-run — worst case is one duplicate email per user.
+ *
+ *   npx tsx scripts/digest-check.ts --preview @username > preview.html
+ *     Loads the digest data for that user, builds the email HTML
+ *     locally, and writes it to stdout. Pipe to a file and open in
+ *     a browser to see EXACTLY what gets generated, bypassing all
+ *     email-client rendering quirks (Gmail "trimmed content" collapse,
+ *     Outlook CSS pruning, etc.). Useful for debugging missing-section
+ *     reports — if a section is in preview.html, the bug is the
+ *     client; if it's missing here, the bug is in our render.
  */
 import { config as dotenvConfig } from "dotenv";
 dotenvConfig({ path: ".env.local" });
@@ -170,6 +179,93 @@ async function resetUser() {
   );
 }
 
+async function preview() {
+  // Lazy-import so the diagnostic / send / reset paths don't pay
+  // the cost of pulling in the digest-data + html-builder modules
+  // (and their transitive deps) on every invocation.
+  const { loadDigestLeagues } = await import("../src/lib/email/digestData");
+  const { buildWeeklyDigest } = await import("../src/lib/email/weeklyDigest");
+
+  const idx = process.argv.indexOf("--preview");
+  const handle = process.argv[idx + 1];
+  if (!handle || handle.startsWith("--")) {
+    console.error(
+      "Usage: npx tsx scripts/digest-check.ts --preview @username",
+    );
+    process.exit(1);
+  }
+  const cleanHandle = handle.replace(/^@/, "");
+  const { data: profile } = await sb
+    .from("profiles")
+    .select("user_id, username, display_name")
+    .ilike("username", cleanHandle)
+    .maybeSingle();
+  if (!profile) {
+    console.error(`No profile found for "${cleanHandle}"`);
+    process.exit(1);
+  }
+  const userId = profile.user_id as string;
+  const username = profile.username as string;
+
+  const { data: userRes } = await sb.auth.admin.getUserById(userId);
+  const email = userRes.user?.email ?? "preview@example.com";
+
+  const { leagues, skippedLeagues } = await loadDigestLeagues(sb, {
+    userId,
+    username,
+  });
+
+  // Stderr so it doesn't pollute the HTML on stdout when piping.
+  console.error(
+    `Loaded ${leagues.length} leagues for @${username} (skipped ${skippedLeagues.length}).`,
+  );
+  if (skippedLeagues.length > 0) {
+    for (const s of skippedLeagues) {
+      console.error(`  skipped ${s.leagueName}: ${s.reason}`);
+    }
+  }
+
+  // Show what fields are present per league — quick sanity check
+  // that's faster than scrolling the HTML for a missing section.
+  for (const l of leagues) {
+    console.error(`\n[${l.leagueName}]`);
+    console.error(`  card:        ${JSON.stringify(l.card)} rank=${l.cardRank}`);
+    console.error(
+      `  strongest:   ${l.strongest ? `${l.strongest.position} #${l.strongest.rank}/${l.strongest.totalRosters} (${l.strongest.deltaPct}%)` : "MISSING"}`,
+    );
+    console.error(
+      `  weakest:     ${l.weakest ? `${l.weakest.position} #${l.weakest.rank}/${l.weakest.totalRosters} (${l.weakest.deltaPct}%)` : "MISSING"}`,
+    );
+    console.error(
+      `  topRisers:   ${l.topRisers?.length ?? 0} entries`,
+    );
+    console.error(
+      `  topFallers:  ${l.topFallers?.length ?? 0} entries`,
+    );
+    console.error(
+      `  partners:    ${l.tradePartners?.length ?? 0} entries`,
+    );
+    console.error(
+      `  biggestTrade: ${l.biggestTrade ? `winner @${l.biggestTrade.winnerOwner} (+${l.biggestTrade.winnerNetPyv})` : "null"}`,
+    );
+    console.error(
+      `  leagueLoser: ${l.leagueLoser ? `${l.leagueLoser.name} ${l.leagueLoser.delta}` : "null"}`,
+    );
+    console.error(`  topSells:    ${l.topSells.length} entries`);
+  }
+
+  const digest = buildWeeklyDigest({
+    email,
+    username: (profile.display_name as string | null) ?? username,
+    leagues,
+    appBaseUrl: BASE,
+    unsubscribeUrl: `${BASE}/email/unsubscribe?token=preview`,
+  });
+
+  // Print just the html to stdout (the meaningful render output).
+  process.stdout.write(digest.html);
+}
+
 async function resetAll() {
   // Pull the opted-in user list first so we can report names + count.
   // Acts as a confirmation: caller sees what they're about to clear.
@@ -198,13 +294,16 @@ async function resetAll() {
 const resetAllFlag = process.argv.includes("--reset-all");
 const reset = process.argv.includes("--reset");
 const send = process.argv.includes("--send");
-const action = resetAllFlag
-  ? resetAll()
-  : reset
-    ? resetUser()
-    : send
-      ? manualSend()
-      : diagnose();
+const previewFlag = process.argv.includes("--preview");
+const action = previewFlag
+  ? preview()
+  : resetAllFlag
+    ? resetAll()
+    : reset
+      ? resetUser()
+      : send
+        ? manualSend()
+        : diagnose();
 action.catch((e) => {
   console.error(e);
   process.exit(1);
