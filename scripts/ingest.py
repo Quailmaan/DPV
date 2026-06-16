@@ -152,6 +152,7 @@ def ingest_rosters(seasons: list[int]) -> tuple[dict[str, str], dict[str, str]]:
     # Falls back gracefully if the CSV isn't reachable — draft_round stays
     # None, matching previous behavior.
     draft_idx: dict[str, tuple[int, int]] = {}
+    dp = None  # kept in scope so the rookie-synthesis pass below can reuse it
     try:
         dp = fetch_draft_picks()
         print(f"  draft_picks: {len(dp)} rows")
@@ -199,6 +200,96 @@ def ingest_rosters(seasons: list[int]) -> tuple[dict[str, str], dict[str, str]]:
         )
     drafted = sum(1 for p in players if p["draft_round"] is not None)
     print(f"  {len(players)} unique players ({drafted} with draft_round from nflverse)")
+
+    # Synthesize players rows for freshly-drafted rookies that aren't in the
+    # roster file yet. nflverse roster_<year>.parquet lags the draft by days
+    # to weeks; draft_picks.csv updates within days of the draft. Without
+    # this, the new class is invisible in rankings (no players row → no DPV
+    # snapshot) during the window when interest peaks. We build rows straight
+    # from draft_picks (gsis_id, name, position, round, season, team) and
+    # derive birthdate from the age column. When the roster file later catches
+    # up, those same gsis_ids re-upsert with the authoritative birthdate.
+    #
+    # Scoped to the most recent draft year only — older classes are already
+    # in the roster files. Skill positions only (matches rankings scope).
+    if dp is not None and not dp.empty and "season" in dp.columns:
+        existing_ids = {str(p["player_id"]) for p in players}
+        # nflverse roster team abbreviations are the source of truth for the
+        # team_seasons join (OL rank, QB tier) in compute-dpv. draft_picks
+        # carries PFR-style abbreviations that differ for a handful of teams;
+        # map the known mismatches, and only apply the map when the raw value
+        # isn't already a valid roster abbreviation.
+        valid_teams = set(
+            str(t) for t in rosters[team_col].dropna().unique()
+        )
+        PFR_TEAM_FIX = {
+            "GNB": "GB", "KAN": "KC", "LVR": "LV", "NWE": "NE",
+            "NOR": "NO", "SFO": "SF", "TAM": "TB", "OAK": "LV",
+            "SDG": "LAC", "STL": "LA", "LAR": "LA",
+        }
+
+        def fix_team(raw: object) -> str | None:
+            if pd.isna(raw):
+                return None
+            t = str(raw)
+            if t in valid_teams:
+                return t
+            mapped = PFR_TEAM_FIX.get(t)
+            return mapped if mapped in valid_teams else t
+
+        name_col_dp = (
+            "pfr_player_name" if "pfr_player_name" in dp.columns else "full_name"
+        )
+        latest_draft_year = int(dp["season"].max())
+        fresh = dp[dp["season"] == latest_draft_year]
+        synth = 0
+        for _, d in fresh.iterrows():
+            gsis = d.get("gsis_id")
+            pos = d.get("position")
+            if pd.isna(gsis) or str(gsis) in ("NA", ""):
+                continue
+            if pos not in POSITIONS:
+                continue
+            gsis = str(gsis)
+            if gsis in existing_ids:
+                continue  # already have a real roster row
+            name = d.get(name_col_dp)
+            if pd.isna(name):
+                continue
+            season = int(d["season"])
+            rnd = None if pd.isna(d.get("round")) else int(d["round"])
+            team = fix_team(d.get("team"))
+            # Birthdate from age-at-draft (draft is ~April 25). Default to a
+            # 22-year-old rookie when age is missing so compute-dpv's age gate
+            # doesn't drop the player — refined once the roster file publishes.
+            age_val = d.get("age")
+            age_years = (
+                float(age_val)
+                if pd.notna(age_val) and str(age_val) not in ("", "NA")
+                else 22.0
+            )
+            draft_day = pd.Timestamp(year=season, month=4, day=25)
+            birthdate = (
+                draft_day - pd.Timedelta(days=age_years * 365.25)
+            ).date().isoformat()
+            players.append(
+                {
+                    "player_id": gsis,
+                    "name": name,
+                    "position": pos,
+                    "birthdate": birthdate,
+                    "draft_round": rnd,
+                    "draft_year": season,
+                    "current_team": team,
+                }
+            )
+            existing_ids.add(gsis)
+            synth += 1
+        print(
+            f"  synthesized {synth} fresh {latest_draft_year}-draftee players "
+            f"from draft_picks.csv (not yet in roster file)"
+        )
+
     batched_upsert("players", players, on_conflict="player_id")
     return pfr_to_gsis, sleeper_to_gsis
 
