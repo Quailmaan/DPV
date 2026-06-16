@@ -99,12 +99,18 @@ export async function syncSleeperLeague(
     throw new Error("League ID must be a numeric Sleeper ID.");
   }
 
-  const [leagueRes, usersRes, rostersRes, tradedPicksRes] = await Promise.all([
-    fetch(`https://api.sleeper.app/v1/league/${id}`),
-    fetch(`https://api.sleeper.app/v1/league/${id}/users`),
-    fetch(`https://api.sleeper.app/v1/league/${id}/rosters`),
-    fetch(`https://api.sleeper.app/v1/league/${id}/traded_picks`),
-  ]);
+  const [leagueRes, usersRes, rostersRes, tradedPicksRes, draftsRes] =
+    await Promise.all([
+      fetch(`https://api.sleeper.app/v1/league/${id}`),
+      fetch(`https://api.sleeper.app/v1/league/${id}/users`),
+      fetch(`https://api.sleeper.app/v1/league/${id}/rosters`),
+      fetch(`https://api.sleeper.app/v1/league/${id}/traded_picks`),
+      // Drafts tell us which seasons' rookie drafts are already complete,
+      // so we can drop spent picks from the tradeable pool. A pick for a
+      // season whose draft has finished is no longer an asset — it's been
+      // converted into a player on someone's roster.
+      fetch(`https://api.sleeper.app/v1/league/${id}/drafts`),
+    ]);
 
   if (!leagueRes.ok) {
     throw new Error(
@@ -123,6 +129,29 @@ export async function syncSleeperLeague(
   const tradedPicks: SleeperTradedPick[] = tradedPicksRes.ok
     ? ((await tradedPicksRes.json()) as SleeperTradedPick[]) ?? []
     : [];
+
+  // Seasons whose rookie draft has already happened. Sleeper draft objects
+  // carry { season, status } where status is "pre_draft" | "drafting" |
+  // "complete". Once a season's draft is "complete", that season's rookie
+  // picks are spent and should drop out of the tradeable pool. Failure /
+  // 404 → empty set → no filtering (preserves prior behavior).
+  const completedDraftSeasons = new Set<number>();
+  if (draftsRes.ok) {
+    try {
+      const drafts =
+        ((await draftsRes.json()) as Array<{
+          season?: string | number;
+          status?: string;
+        }> | null) ?? [];
+      for (const d of drafts) {
+        if (d.status !== "complete") continue;
+        const s = Number(d.season);
+        if (Number.isFinite(s)) completedDraftSeasons.add(s);
+      }
+    } catch {
+      // Malformed payload — leave the set empty, no filtering.
+    }
+  }
 
   // Build sleeper_id → gsis_id map by fetching the full Sleeper player set.
   const playersRes = await fetch("https://api.sleeper.app/v1/players/nfl");
@@ -270,8 +299,17 @@ export async function syncSleeperLeague(
   // doesn't expose it, and it's not knowable until standings finalize. The
   // trade calculator values these picks as the round-average DPV.
   // ----------------------------------------------------------------
+  // Drop seasons whose rookie draft is already complete for THIS league —
+  // those picks have been converted to players and are no longer tradeable.
+  // Done per-league (not via the global Sept-1 pivot in currentPickWindow)
+  // because leagues draft on different dates: a May-draft league's 2026
+  // picks are spent in spring, an August-draft league's aren't until late
+  // summer. The global window stays the upper bound; this only removes
+  // seasons the league has actually finished drafting.
   const [y0, y1, y2] = currentPickWindow(new Date());
-  const seasonsInWindow = [y0, y1, y2];
+  const seasonsInWindow = [y0, y1, y2].filter(
+    (s) => !completedDraftSeasons.has(s),
+  );
   const rounds: Array<1 | 2 | 3> = [1, 2, 3];
 
   type PickRow = {
