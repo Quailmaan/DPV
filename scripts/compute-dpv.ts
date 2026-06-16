@@ -302,24 +302,35 @@ async function main() {
     `  ${advancedRows.length} rows, ${advancedByPlayer.size} unique players (using most recent season per player)`,
   );
 
-  console.log("Loading prospect_consensus names...");
-  const prospectRows = await fetchAll<{ name: string; draft_year: number | null }>(
-    "prospect_consensus",
-  );
+  console.log("Loading prospect_consensus names + grades...");
+  const prospectRows = await fetchAll<{
+    name: string;
+    draft_year: number | null;
+    normalized_grade: number | null;
+  }>("prospect_consensus");
   // Only gate against names from the incoming + recently-drafted windows we
   // actually emit priors for. A cross-class normalized-name collision is
   // unlikely, and this keeps the gate scoped to relevant classes.
   const consensusNames = new Set<string>();
+  // Normalized name → consensus grade, for the rookie-prior consensus
+  // overlay. Same window gate as consensusNames.
+  const consensusGradeByName = new Map<string, number>();
   for (const pr of prospectRows) {
     if (
       pr.draft_year !== null &&
       pr.draft_year >= CURRENT_SEASON - 2 &&
       pr.draft_year <= INCOMING_CLASS_YEAR
     ) {
-      consensusNames.add(normalizeName(pr.name));
+      const key = normalizeName(pr.name);
+      consensusNames.add(key);
+      if (pr.normalized_grade !== null) {
+        consensusGradeByName.set(key, Number(pr.normalized_grade));
+      }
     }
   }
-  console.log(`  ${consensusNames.size} normalized consensus names in window`);
+  console.log(
+    `  ${consensusNames.size} consensus names in window (${consensusGradeByName.size} with grades)`,
+  );
 
   console.log("Loading rookie_hsm_comps...");
   const rookieHsmRows = await fetchAll<{
@@ -745,6 +756,14 @@ async function main() {
         const prior = computeRookiePrior({
           position: p.position as Position,
           draftRound: p.draft_round,
+          // Overall pick from nflverse draft_picks.csv (gsis → pick).
+          // Refines the flat round base into a pick-precise value so
+          // 1.01 prices above a late-R1 pick. Null pre-draft / unresolved.
+          overallPick: pickByGsis.get(p.player_id) ?? null,
+          // Consensus scout grade, matched by normalized name. Gentle
+          // ±10% tie-breaker between players at the same draft slot.
+          consensusGrade:
+            consensusGradeByName.get(normalizeName(p.name)) ?? null,
           ageAtDraft,
           teamOLineRank: teamCtx?.oline_composite_rank ?? null,
           qbTier: (teamCtx?.qb_tier ?? null) as QBTier | null,

@@ -167,6 +167,14 @@ function ageAdjust(age: number | null): number {
 export type RookiePriorInput = {
   position: Position;
   draftRound: number | null;
+  // Actual NFL overall pick (1 = 1.01). When present, refines the flat
+  // per-round base into a pick-precise value so 1.01 prices well above
+  // a late-R1 pick. Null/undefined → falls back to the round base.
+  overallPick?: number | null;
+  // 0-100 cross-source scout grade from prospect_consensus. Gentle ±10%
+  // tie-breaker so scout darlings edge out reaches at the same draft slot.
+  // Null/undefined → neutral (player not matched to a tracked prospect).
+  consensusGrade?: number | null;
   ageAtDraft: number | null;
   teamOLineRank: number | null;
   qbTier: QBTier | null;
@@ -208,7 +216,13 @@ export type RookiePriorResult = {
   dpv: number;
   breakdown: {
     kind: "rookie_prior";
+    // Pick-adjusted base actually multiplied into the chain (equals the
+    // flat round base when overallPick is unknown).
     base: number;
+    // Diagnostics for the pick-precision + consensus overlays.
+    overallPick: number | null;
+    consensusGrade: number | null;
+    consensusGradeMult: number;
     oLineMult: number;
     qbTierMult: number;
     ageMult: number;
@@ -290,14 +304,89 @@ export function combineAdjust(score: number | null | undefined): number {
   return 0.88;
 }
 
+// Within-round pick precision. BASE_BY_POSITION_ROUND treats every pick in a
+// round identically — pick 1.01 and pick 1.32 get the same number. That's the
+// single biggest source of unfairness in rookie pricing: the #1 overall pick
+// is a franchise cornerstone, the last pick of round 1 is a dart throw.
+//
+// We anchor each round's base at its MIDDLE overall pick (NFL rounds are 32
+// picks: round R = picks (R-1)*32+1 .. R*32, midpoint (R-1)*32+16) and
+// linearly interpolate by overall pick between adjacent round anchors. This
+// keeps the existing per-round values exact on average (a player at the round
+// midpoint gets the old number) while making the curve continuous and
+// monotonic ACROSS round boundaries — late R1 still outranks early R2, which
+// a naive per-round boost would break. Picks before the R1 midpoint
+// extrapolate toward a ceiling (R1 base × 1.35) so a true 1.01 prices well
+// above a mid-R1 pick. Falls back to the flat round base when overallPick is
+// unknown (pre-draft, or a pick we couldn't resolve).
+const NFL_PICKS_PER_ROUND = 32;
+function roundMidpointPick(round: number): number {
+  return (round - 1) * NFL_PICKS_PER_ROUND + NFL_PICKS_PER_ROUND / 2;
+}
+
+export function pickAdjustedBase(
+  position: Position,
+  round: number | null,
+  overallPick: number | null | undefined,
+): number {
+  if (round === null) return UDFA_BY_POSITION[position];
+  const byRound = BASE_BY_POSITION_ROUND[position];
+  const roundBase = byRound?.[round] ?? UDFA_BY_POSITION[position];
+  if (overallPick === null || overallPick === undefined || roundBase <= 0) {
+    return roundBase;
+  }
+
+  const mid = roundMidpointPick(round);
+  if (overallPick === mid) return roundBase;
+
+  if (overallPick < mid) {
+    // Earlier than this round's midpoint → interpolate UP toward the prior
+    // round's base, or (for round 1) toward a ceiling above the R1 base.
+    const anchorBase = round > 1 ? byRound?.[round - 1] ?? roundBase : roundBase * 1.35;
+    const anchorPick = round > 1 ? roundMidpointPick(round - 1) : 1;
+    const span = mid - anchorPick;
+    const t = span > 0 ? Math.min(1, (mid - overallPick) / span) : 0;
+    return Math.round(roundBase + (anchorBase - roundBase) * t);
+  }
+
+  // Later than this round's midpoint → interpolate DOWN toward the next
+  // round's base (or 60% of this round's base past the last modeled round).
+  const nextBase = byRound?.[round + 1] ?? roundBase * 0.6;
+  const nextPick = roundMidpointPick(round + 1);
+  const span = nextPick - mid;
+  const t = span > 0 ? Math.min(1, (overallPick - mid) / span) : 0;
+  return Math.round(roundBase + (nextBase - roundBase) * t);
+}
+
+// Consensus-grade overlay. prospect_consensus.normalized_grade is a 0-100
+// cross-source scout grade (avg ≈ 75, R1 elites ≈ 92-96, fringe Day-3 ≈
+// 55-65). Two players drafted at the same slot aren't equal — one may be a
+// consensus top-5 talent who slid, the other a team "reach." Kept to a gentle
+// ±10% band (tighter than the trade calc's ±15%) because pick-precise draft
+// capital already captures most of the scouting signal — this only nudges
+// the cases where slot and scout grade diverge. Null/unmatched → neutral.
+function consensusGradeMult(grade: number | null | undefined): number {
+  if (grade === null || grade === undefined) return 1.0;
+  if (grade >= 92) return 1.1;
+  if (grade >= 84) return 1.05;
+  if (grade >= 76) return 1.02;
+  if (grade >= 66) return 1.0;
+  if (grade >= 56) return 0.97;
+  if (grade >= 46) return 0.93;
+  return 0.9;
+}
+
 export function computeRookiePrior(
   input: RookiePriorInput,
 ): RookiePriorResult {
-  const base =
-    input.draftRound === null
-      ? UDFA_BY_POSITION[input.position]
-      : (BASE_BY_POSITION_ROUND[input.position]?.[input.draftRound] ??
-          UDFA_BY_POSITION[input.position]);
+  // Pick-precise base: interpolates within/across rounds using the actual
+  // overall pick when available, else falls back to the flat round value.
+  const base = pickAdjustedBase(
+    input.position,
+    input.draftRound,
+    input.overallPick,
+  );
+  const consensusMult = consensusGradeMult(input.consensusGrade);
 
   const oLineMult = oLineAdjust(input.position, input.teamOLineRank ?? 16);
   const qbTierMult = qbTierAdjust(input.position, (input.qbTier ?? 3) as QBTier);
@@ -325,6 +414,7 @@ export function computeRookiePrior(
 
   const preHsmDPV =
     base *
+    consensusMult *
     oLineMult *
     qbTierMult *
     ageMult *
@@ -363,6 +453,12 @@ export function computeRookiePrior(
     breakdown: {
       kind: "rookie_prior",
       base,
+      overallPick: input.overallPick ?? null,
+      consensusGrade:
+        input.consensusGrade !== null && input.consensusGrade !== undefined
+          ? Number(input.consensusGrade)
+          : null,
+      consensusGradeMult: Number(consensusMult.toFixed(3)),
       oLineMult: Number(oLineMult.toFixed(3)),
       qbTierMult: Number(qbTierMult.toFixed(3)),
       ageMult: Number(ageMult.toFixed(3)),
