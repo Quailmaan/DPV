@@ -1,6 +1,6 @@
-// Pro-only CSV export — top 200 unrostered ranked players. Same cap
-// the page uses, sorted by PYV descending. No position filter (the
-// downloader can sort/filter in their spreadsheet).
+// Pro-only CSV export — every unrostered ranked player, sorted by PYV
+// descending. No position filter and no row cap (the downloader can
+// sort/filter the full board in their spreadsheet).
 
 import {
   buildFreeAgentsCsv,

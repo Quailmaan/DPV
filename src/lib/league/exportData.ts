@@ -199,11 +199,13 @@ export async function loadExportContext(
   });
   summaries.sort((a, b) => b.totalDpv - a.totalDpv);
 
-  // Free agents — same 200-cap as the page so the CSV reflects what the
-  // user sees on screen. Larger lists drift quickly anyway.
-  const freeAgents = snapshots
-    .filter((s) => !allRosteredIds.has(s.player_id))
-    .slice(0, 200);
+  // Free agents — every unrostered ranked player. The page paginates the
+  // full list now (no 200 cap), and a CSV export is exactly where you
+  // want the complete board to sort/filter in a spreadsheet, so we export
+  // all of them rather than just the first page.
+  const freeAgents = snapshots.filter(
+    (s) => !allRosteredIds.has(s.player_id),
+  );
 
   return {
     league,

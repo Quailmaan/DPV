@@ -18,6 +18,7 @@ import {
   type SellWindow,
 } from "@/lib/dpv/sellWindow";
 import SellWindowBadge from "@/components/SellWindowBadge";
+import { Pagination } from "@/components/Pagination";
 import {
   findTrades,
   type TradeFinderTeam,
@@ -30,7 +31,13 @@ type SearchParams = Promise<{
   team?: string;
   pos?: string;
   pick?: string;
+  fapage?: string;
 }>;
+
+// Free-agent table page size. Browsing FAs is position-filter-first,
+// then paged — 50 per page keeps the table scannable while letting
+// users reach every available player.
+const FA_PAGE_SIZE = 50;
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE"] as const;
 
@@ -46,6 +53,9 @@ export default async function LeagueDetailPage({
   const explicitTeamFilter = sp.team ?? "";
   const showPickBanner = sp.pick === "1";
   const posFilter = (sp.pos ?? "ALL").toUpperCase();
+  // Requested free-agent page (1-indexed). Clamped against the filtered
+  // count after we know how many FAs match the position filter.
+  const faPageReq = Math.max(1, parseInt(sp.fapage ?? "1", 10) || 1);
 
   const session = await getCurrentSession();
   if (!session) redirect(`/login?next=/league/${id}`);
@@ -310,10 +320,13 @@ export default async function LeagueDetailPage({
   leaguePosAvg.WR /= nRosters;
   leaguePosAvg.TE /= nRosters;
 
-  // Free agents: ranked players not on any roster.
-  const freeAgents = (snapshots ?? [])
-    .filter((s) => !allRosteredIds.has(s.player_id))
-    .slice(0, 200) as unknown as Snap[];
+  // Free agents: every ranked player not on any roster. Previously
+  // capped at the top 200 by PYV, which hid ~185 available players in a
+  // 12-team league — the table is paginated now, so we keep the full
+  // list and let the page controls + position filter handle browsing.
+  const freeAgents = (snapshots ?? []).filter(
+    (s) => !allRosteredIds.has(s.player_id),
+  ) as unknown as Snap[];
 
   // Resolve which team the page focuses on. Priority order:
   //   1. ?team=<rosterId> in the URL (explicit override — admin/exploring)
@@ -463,6 +476,28 @@ export default async function LeagueDetailPage({
     if (posFilter === "ALL") return true;
     return fa.players.position === posFilter;
   });
+
+  // Paginate the FA table. Clamp the requested page into range so a stale
+  // ?fapage=9 after switching to a sparse position filter doesn't render
+  // an empty table.
+  const faTotalItems = filteredFAs.length;
+  const faTotalPages = Math.max(1, Math.ceil(faTotalItems / FA_PAGE_SIZE));
+  const faPage = Math.min(faPageReq, faTotalPages);
+  const pagedFAs = filteredFAs.slice(
+    (faPage - 1) * FA_PAGE_SIZE,
+    faPage * FA_PAGE_SIZE,
+  );
+  // FA pagination links preserve the team + position filters and only
+  // carry fapage. Position-filter changes (links above) intentionally
+  // omit fapage, so switching position resets to page 1.
+  const buildFaHref = (page: number) => {
+    const params = new URLSearchParams();
+    if (teamFilter) params.set("team", teamFilter);
+    if (posFilter !== "ALL") params.set("pos", posFilter);
+    if (page > 1) params.set("fapage", String(page));
+    const s = params.toString();
+    return `/league/${id}${s ? `?${s}` : ""}`;
+  };
 
   return (
     <div>
@@ -811,7 +846,7 @@ export default async function LeagueDetailPage({
             </tr>
           </thead>
           <tbody>
-            {filteredFAs.slice(0, 50).map((fa) => (
+            {pagedFAs.map((fa) => (
               <tr
                 key={fa.player_id}
                 className="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 active:bg-zinc-100 dark:active:bg-zinc-800"
@@ -853,6 +888,16 @@ export default async function LeagueDetailPage({
           </tbody>
         </table>
       </div>
+      {faTotalItems > 0 && (
+        <Pagination
+          currentPage={faPage}
+          totalPages={faTotalPages}
+          totalItems={faTotalItems}
+          pageSize={FA_PAGE_SIZE}
+          buildHref={buildFaHref}
+          itemLabel="free agents"
+        />
+      )}
     </div>
   );
 }
