@@ -302,11 +302,12 @@ async function main() {
     `  ${advancedRows.length} rows, ${advancedByPlayer.size} unique players (using most recent season per player)`,
   );
 
-  console.log("Loading prospect_consensus names + grades...");
+  console.log("Loading prospect_consensus names + grades + picks...");
   const prospectRows = await fetchAll<{
     name: string;
     draft_year: number | null;
     normalized_grade: number | null;
+    projected_overall_pick: number | null;
   }>("prospect_consensus");
   // Only gate against names from the incoming + recently-drafted windows we
   // actually emit priors for. A cross-class normalized-name collision is
@@ -315,6 +316,10 @@ async function main() {
   // Normalized name → consensus grade, for the rookie-prior consensus
   // overlay. Same window gate as consensusNames.
   const consensusGradeByName = new Map<string, number>();
+  // Normalized name → actual overall pick. Fallback for pick precision
+  // on sleeper:-keyed rookies (created by sync-rookie-existence) that
+  // pickByGsis can't resolve because they have no gsis yet.
+  const consensusPickByName = new Map<string, number>();
   for (const pr of prospectRows) {
     if (
       pr.draft_year !== null &&
@@ -326,10 +331,13 @@ async function main() {
       if (pr.normalized_grade !== null) {
         consensusGradeByName.set(key, Number(pr.normalized_grade));
       }
+      if (pr.projected_overall_pick !== null) {
+        consensusPickByName.set(key, Number(pr.projected_overall_pick));
+      }
     }
   }
   console.log(
-    `  ${consensusNames.size} consensus names in window (${consensusGradeByName.size} with grades)`,
+    `  ${consensusNames.size} consensus names in window (${consensusGradeByName.size} grades, ${consensusPickByName.size} picks)`,
   );
 
   console.log("Loading rookie_hsm_comps...");
@@ -756,10 +764,13 @@ async function main() {
         const prior = computeRookiePrior({
           position: p.position as Position,
           draftRound: p.draft_round,
-          // Overall pick from nflverse draft_picks.csv (gsis → pick).
-          // Refines the flat round base into a pick-precise value so
-          // 1.01 prices above a late-R1 pick. Null pre-draft / unresolved.
-          overallPick: pickByGsis.get(p.player_id) ?? null,
+          // Overall pick — from nflverse draft_picks.csv (gsis → pick)
+          // when available, else the consensus name fallback so
+          // sleeper:-keyed rookies (no gsis yet) still price pick-precise.
+          overallPick:
+            pickByGsis.get(p.player_id) ??
+            consensusPickByName.get(normalizeName(p.name)) ??
+            null,
           // Consensus scout grade, matched by normalized name. Gentle
           // ±10% tie-breaker between players at the same draft slot.
           consensusGrade:

@@ -59,6 +59,7 @@ type SleeperPlayer = {
   last_name?: string;
   position?: string;
   team?: string;
+  years_exp?: number | null;
 };
 
 function normalizeName(name: string): string {
@@ -218,9 +219,17 @@ export async function syncSleeperLeague(
       if (tm) return tm;
     }
     const candidates = nameIndex.get(key);
-    if (!candidates || candidates.length === 0) return null;
-    if (candidates.length === 1) return candidates[0];
-    return null; // ambiguous — skip
+    if (candidates && candidates.length === 1) return candidates[0];
+    if (candidates && candidates.length > 1) return null; // ambiguous — skip
+
+    // Last resort: a fresh rookie (years_exp 0) that we don't have a
+    // players row for yet gets a sleeper-keyed id, matching the row
+    // sync-rookie-existence creates for the same player. Limited to
+    // rookies so we don't manufacture blank roster slots for obscure
+    // deep-roster vets we simply don't track. Once nflverse assigns the
+    // real gsis, the existence sync's cleanup retires the sleeper row.
+    if (sp.years_exp === 0) return `sleeper:${sid}`;
+    return null;
   }
 
   const format = detectFormat(league.scoring_settings);

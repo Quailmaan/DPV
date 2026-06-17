@@ -76,6 +76,12 @@ const STEPS: Step[] = [
     note: "Aggregate per-source prospect grades into cross-source consensus",
   },
   {
+    name: "sync-rookie-existence",
+    cmd: TSX[0],
+    args: [TSX[1], "scripts/sync-rookie-existence.ts"],
+    note: "Create players rows for incoming-class rookies missing from nflverse via Sleeper identity (fixes the post-draft gsis lag); cleans up sleeper-keyed rows once nflverse catches up",
+  },
+  {
     name: "compute-class-strength",
     cmd: TSX[0],
     args: [TSX[1], "scripts/compute-class-strength.ts"],
