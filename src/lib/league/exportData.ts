@@ -19,6 +19,12 @@ import {
 } from "@/lib/dpv/sellWindow";
 import type { ScoringFormat } from "@/lib/dpv/types";
 import { buildCsv } from "@/lib/csv";
+import {
+  effectiveStarters,
+  replacementLevels,
+  suggestFaab,
+  type FaabPosition,
+} from "@/lib/league/faab";
 
 type Snap = {
   player_id: string;
@@ -49,6 +55,8 @@ export type ExportContext = {
     season: string;
     scoring_format: ScoringFormat;
     synced_at: string;
+    roster_positions: string[] | null;
+    total_rosters: number | null;
   };
   rosters: Array<{
     league_id: string;
@@ -72,7 +80,9 @@ export async function loadExportContext(
 ): Promise<ExportContext | null> {
   const leagueRes = await sb
     .from("leagues")
-    .select("league_id, name, season, scoring_format, synced_at")
+    .select(
+      "league_id, name, season, scoring_format, synced_at, roster_positions, total_rosters",
+    )
     .eq("league_id", leagueId)
     .maybeSingle();
   if (leagueRes.error || !leagueRes.data) return null;
@@ -294,17 +304,44 @@ export function buildTeamRosterCsv(
 }
 
 export function buildFreeAgentsCsv(ctx: ExportContext): string {
-  const headers = ["Player", "Position", "NFL Team", "Age", "PYV", "Tier"];
+  // FAAB suggestions, roster-agnostic (the export isn't team-focused, so
+  // no need multiplier). Replacement levels are computed from every ranked
+  // player at each position in snapMap.
+  const pyvByPosition: Record<FaabPosition, number[]> = {
+    QB: [],
+    RB: [],
+    WR: [],
+    TE: [],
+  };
+  for (const s of ctx.snapMap.values()) {
+    const pos = s.players?.position as FaabPosition | undefined;
+    if (pos && pos in pyvByPosition) pyvByPosition[pos].push(s.dpv);
+  }
+  for (const pos of ["QB", "RB", "WR", "TE"] as FaabPosition[]) {
+    pyvByPosition[pos].sort((a, b) => b - a);
+  }
+  const starterDemand = effectiveStarters(
+    ctx.league.roster_positions,
+    ctx.league.total_rosters ?? ctx.summaries.length,
+  );
+  const replacement = replacementLevels(pyvByPosition, starterDemand);
+
+  const headers = ["Player", "Position", "NFL Team", "Age", "PYV", "Suggested FAAB"];
   const rows = ctx.freeAgents
     .filter((s) => !!s.players)
-    .map((s) => [
-      s.players!.name,
-      s.players!.position,
-      s.players!.current_team ?? "",
-      ageFrom(s.players!.birthdate),
-      s.dpv,
-      s.tier,
-    ]);
+    .map((s) => {
+      const pos = s.players!.position as FaabPosition;
+      const bid =
+        pos in replacement ? suggestFaab(s.dpv, pos, replacement) : 0;
+      return [
+        s.players!.name,
+        s.players!.position,
+        s.players!.current_team ?? "",
+        ageFrom(s.players!.birthdate),
+        s.dpv,
+        `$${bid}`,
+      ];
+    });
   return buildCsv(headers, rows);
 }
 

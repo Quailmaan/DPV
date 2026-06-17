@@ -20,6 +20,13 @@ import {
 import SellWindowBadge from "@/components/SellWindowBadge";
 import { Pagination } from "@/components/Pagination";
 import {
+  effectiveStarters,
+  needMultiplier,
+  replacementLevels,
+  suggestFaab,
+  type FaabPosition,
+} from "@/lib/league/faab";
+import {
   findTrades,
   type TradeFinderTeam,
   type TradeFinderPlayer,
@@ -477,6 +484,39 @@ export default async function LeagueDetailPage({
     return fa.players.position === posFilter;
   });
 
+  // ── FAAB suggestions ────────────────────────────────────────────
+  // Replacement-value model: a FA only earns real FAAB if its PYV is
+  // above the league's startable line at that position, scaled by how
+  // far above, then nudged by the focused team's need. See faab.ts.
+  // Replacement levels are computed from EVERY ranked player at each
+  // position (rostered + FA), already PYV-desc since snapshots are
+  // ordered by dpv.
+  const pyvByPosition: Record<FaabPosition, number[]> = {
+    QB: [],
+    RB: [],
+    WR: [],
+    TE: [],
+  };
+  for (const s of (snapshots ?? []) as unknown as Snap[]) {
+    const pos = s.players?.position as FaabPosition | undefined;
+    if (pos && pos in pyvByPosition) pyvByPosition[pos].push(s.dpv);
+  }
+  const starterDemand = effectiveStarters(
+    league.roster_positions,
+    league.total_rosters ?? summaries.length,
+  );
+  const replacement = replacementLevels(pyvByPosition, starterDemand);
+  function faabFor(fa: Snap): number {
+    const pos = fa.players?.position as FaabPosition | undefined;
+    if (!pos || !(pos in replacement)) return 0;
+    // Need multiplier only when a team is focused — the unfocused
+    // power-rankings view shows roster-agnostic value.
+    const need = focusedTeam
+      ? needMultiplier(focusedTeam.byPos[pos], leaguePosAvg[pos])
+      : 1.0;
+    return suggestFaab(fa.dpv, pos, replacement, need);
+  }
+
   // Paginate the FA table. Clamp the requested page into range so a stale
   // ?fapage=9 after switching to a sparse position filter doesn't render
   // an empty table.
@@ -842,7 +882,12 @@ export default async function LeagueDetailPage({
               <th className="hidden lg:table-cell px-3 py-2 text-left">Team</th>
               <th className="hidden md:table-cell px-3 py-2 text-right">Age</th>
               <th className="px-3 py-2 text-right">PYV</th>
-              <th className="hidden sm:table-cell px-3 py-2 text-left">Tier</th>
+              <th
+                className="px-3 py-2 text-right"
+                title="Suggested max bid out of your $100 season FAAB budget. Above-replacement starters earn real money; depth pieces stay near $0. Adjusted for your roster's need at the position when a team is selected."
+              >
+                FAAB
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -862,7 +907,7 @@ export default async function LeagueDetailPage({
                     {[
                       fa.players!.position,
                       fa.players!.current_team,
-                      fa.tier,
+                      `FAAB $${faabFor(fa)}`,
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -882,7 +927,22 @@ export default async function LeagueDetailPage({
                 <td className="px-3 py-2 text-right tabular-nums font-semibold">
                   {fa.dpv}
                 </td>
-                <td className="hidden sm:table-cell px-3 py-2 text-zinc-500">{fa.tier}</td>
+                {(() => {
+                  const bid = faabFor(fa);
+                  return (
+                    <td
+                      className={`px-3 py-2 text-right tabular-nums font-medium ${
+                        bid >= 20
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : bid >= 5
+                            ? "text-zinc-700 dark:text-zinc-300"
+                            : "text-zinc-400"
+                      }`}
+                    >
+                      ${bid}
+                    </td>
+                  );
+                })()}
               </tr>
             ))}
           </tbody>
