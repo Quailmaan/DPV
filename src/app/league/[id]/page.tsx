@@ -932,9 +932,9 @@ export default async function LeagueDetailPage({
                   return (
                     <td
                       className={`px-3 py-2 text-right tabular-nums font-medium ${
-                        bid >= 20
+                        bid >= 40
                           ? "text-emerald-600 dark:text-emerald-400"
-                          : bid >= 5
+                          : bid >= 10
                             ? "text-zinc-700 dark:text-zinc-300"
                             : "text-zinc-400"
                       }`}

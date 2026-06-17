@@ -18,10 +18,23 @@
 
 export type FaabPosition = "QB" | "RB" | "WR" | "TE";
 
-// Most a single player should ever be suggested at — half the season
-// budget. A true league-winner can justify it; everything else lands
-// well below.
-const MAX_BID = 50;
+// Full default season budget. A genuine league-winner on waivers can
+// justify going all-in; the convex curve below keeps everything short
+// of that well under the cap so you don't blow the budget on filler.
+const MAX_BID = 100;
+
+// Convexity on the bid curve. >1 means marginal/solid adds stay modest
+// while only the truly elite (near the top of the surplus band) climb
+// toward the cap — so raising MAX_BID to the full $100 doesn't inflate
+// the mid-range. Tuned so a clear starter upgrade lands ~$45-65 and
+// only a 1.5x-replacement stud approaches $100.
+const BID_GAMMA = 1.8;
+
+// Surplus band: a FA at REPL_FLOOR× replacement or below earns $0
+// (depth); at REPL_CEIL× it maxes out. Widened past the old 1.45 so
+// the top of the budget is reserved for genuine difference-makers.
+const REPL_FLOOR = 0.85;
+const REPL_CEIL = 1.55;
 
 // Effective league-wide starters per position from Sleeper roster_positions.
 // Dedicated slots count fully; FLEX / SUPER_FLEX distribute across eligible
@@ -119,8 +132,12 @@ export function suggestFaab(
   const repl = replacement[position];
   if (repl <= 0) return 0;
   const ratio = faPyv / repl;
-  const shaped = Math.max(0, Math.min(1, (ratio - 0.85) / 0.6));
+  const shaped = Math.max(
+    0,
+    Math.min(1, (ratio - REPL_FLOOR) / (REPL_CEIL - REPL_FLOOR)),
+  );
   if (shaped <= 0) return 0;
-  const bid = Math.round(MAX_BID * shaped * need);
+  const curved = Math.pow(shaped, BID_GAMMA);
+  const bid = Math.round(MAX_BID * curved * need);
   return Math.max(1, Math.min(MAX_BID, bid));
 }
