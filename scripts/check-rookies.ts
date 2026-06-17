@@ -135,21 +135,89 @@ async function main() {
   const iGsis = header.indexOf("gsis_id");
   const iAge = header.indexOf("age");
   const iName = header.indexOf("pfr_player_name");
-  let count = 0;
-  let withGsis = 0;
-  let withAge = 0;
+  const iRound = header.indexOf("round");
+  const iPick = header.indexOf("pick");
+
+  type Pick = {
+    name: string;
+    pos: string;
+    gsis: string | null;
+    round: number;
+    pick: number;
+    hasAge: boolean;
+  };
+  const picks: Pick[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(",");
     if (parseInt(cols[iSeason], 10) !== DRAFT_YEAR) continue;
     if (!["QB", "RB", "WR", "TE"].includes((cols[iPos] ?? "").trim())) continue;
-    count++;
-    if (cols[iGsis] && cols[iGsis] !== "NA") withGsis++;
-    if (cols[iAge] && cols[iAge] !== "NA" && cols[iAge] !== "") withAge++;
+    const gsisRaw = cols[iGsis];
+    picks.push({
+      name: (cols[iName] ?? "").trim(),
+      pos: (cols[iPos] ?? "").trim(),
+      gsis: gsisRaw && gsisRaw !== "NA" && gsisRaw !== "" ? gsisRaw : null,
+      round: parseInt(cols[iRound], 10),
+      pick: parseInt(cols[iPick], 10),
+      hasAge: !!cols[iAge] && cols[iAge] !== "NA" && cols[iAge] !== "",
+    });
   }
-  console.log(`  ${count} skill picks; ${withGsis} have gsis_id; ${withAge} have age`);
+  const withGsis = picks.filter((p) => p.gsis).length;
+  const withAge = picks.filter((p) => p.hasAge).length;
   console.log(
-    `  (gsis_id needed to create a players row; age needed to derive birthdate)`,
+    `  ${picks.length} skill picks; ${withGsis} have gsis_id; ${withAge} have age`,
   );
+
+  // 5. The actual gap: which picks are NOT in dpv_snapshots, and why?
+  console.log(`\nMissing-from-rankings report:`);
+  const snaps = await fetchAll<{ player_id: string }>(
+    "dpv_snapshots",
+    "player_id",
+    (q) =>
+      (q as ReturnType<ReturnType<typeof sb.from>["select"]>).eq(
+        "scoring_format",
+        "HALF_PPR",
+      ),
+  );
+  const snapIds = new Set(snaps.map((s) => s.player_id));
+  const playerIds = new Set(players.map((p) => p.player_id));
+  // Build a normalized-name → snapshot presence check for the gsis-less
+  // picks (we can still tell if SOME row by that name made it in).
+  const playerNamesNorm = new Map<string, string>(); // norm name → player_id
+  for (const p of players) {
+    playerNamesNorm.set(
+      p.name.toLowerCase().replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim(),
+      p.player_id,
+    );
+  }
+  const missing: { pick: Pick; reason: string }[] = [];
+  for (const p of picks) {
+    if (p.gsis && snapIds.has(p.gsis)) continue; // present, good
+    let reason: string;
+    if (!p.gsis) {
+      // Try a name match to see if they slipped in some other way.
+      const norm = p.name
+        .toLowerCase()
+        .replace(/[^a-z ]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const matchId = playerNamesNorm.get(norm);
+      reason =
+        matchId && snapIds.has(matchId)
+          ? "OK (matched by name, no gsis in CSV)"
+          : "NO gsis_id in draft_picks.csv → no players row";
+    } else if (!playerIds.has(p.gsis)) {
+      reason = "has gsis but no players row (synthesis missed?)";
+    } else {
+      reason = "in players but no snapshot (compute-dpv skipped — check age/round)";
+    }
+    if (!reason.startsWith("OK")) missing.push({ pick: p, reason });
+  }
+  console.log(`  ${missing.length} of ${picks.length} picks missing from snapshots:`);
+  for (const m of missing.sort((a, b) => a.pick.pick - b.pick.pick)) {
+    console.log(
+      `    ${String(m.pick.pick).padStart(3)} R${m.pick.round} ${m.pick.pos.padEnd(3)} ${m.pick.name.padEnd(26)} — ${m.reason}`,
+    );
+  }
 }
 
 main().catch((e) => {
