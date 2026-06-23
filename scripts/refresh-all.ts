@@ -70,6 +70,12 @@ const STEPS: Step[] = [
     note: "Upsert manually-curated prospect rows from data/prospects.csv into the prospects table — required so commits to the CSV (e.g. adding a new mock-draft source) flow through to the rookies page automatically",
   },
   {
+    name: "cleanup-stale-prospects",
+    cmd: TSX[0],
+    args: [TSX[1], "scripts/cleanup-stale-prospects.ts"],
+    note: "Purge prospects/consensus rows no longer in the CSV — ingest only upserts, so removed sources (e.g. PYLON_SEED) would otherwise linger as stale 'proj' entries on the rookies page",
+  },
+  {
     name: "compute-prospect-consensus",
     cmd: TSX[0],
     args: [TSX[1], "scripts/compute-prospect-consensus.ts"],

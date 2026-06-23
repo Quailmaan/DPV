@@ -39,6 +39,29 @@ function deriveCurrentSeason(): number {
 
 export const CURRENT_SEASON = deriveCurrentSeason();
 
+// Upcoming NFL draft class for the prospect board. Unlike CURRENT_SEASON
+// (which follows the NFL *season* cycle and pivots in March), the prospect
+// board follows the *draft* cycle: once the NFL draft happens (late April),
+// the next players to be drafted are next year's class, so the board should
+// advance. We pivot May 1 — after the draft is in the books.
+//
+//   Jan Y – Apr Y  → upcoming = Y   (this year's draft hasn't happened yet)
+//   May Y – Dec Y  → upcoming = Y+1 (this year's draft is done)
+//
+// On e.g. 2026-06-17 this returns 2027 (the 2026 draft is over), while
+// CURRENT_SEASON stays 2025 and INCOMING/just-drafted class stays 2026 for
+// the rookie-prior pipeline. Override with DPV_PROSPECT_CLASS_YEAR for repro.
+export function upcomingProspectClassYear(now: Date = new Date()): number {
+  const env = process.env.DPV_PROSPECT_CLASS_YEAR;
+  if (env) {
+    const n = parseInt(env, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth() + 1; // 1-12
+  return month >= 5 ? year + 1 : year;
+}
+
 // Per-season trust factor based on games played. 15-17 = treated as a full
 // year (random 1-2 game injuries shouldn't punish a healthy year). Below
 // that, the sample shrinks and we downweight toward PPG noise.

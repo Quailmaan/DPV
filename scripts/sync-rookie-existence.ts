@@ -132,24 +132,32 @@ async function main() {
     players.map((p) => `${normalizeName(p.name)}|${p.position}`),
   );
 
-  // 2b. Cleanup: drop sleeper-keyed rows that now have a gsis-keyed twin
-  //     (nflverse caught up). Remove their snapshots too so they don't
-  //     linger as duplicate ranking rows.
-  const gsisKeys = new Set(
-    players
-      .filter((p) => !p.player_id.startsWith("sleeper:"))
-      .map((p) => `${normalizeName(p.name)}|${p.position}`),
-  );
-  const staleIds = players
-    .filter(
-      (p) =>
-        p.player_id.startsWith("sleeper:") &&
-        gsisKeys.has(`${normalizeName(p.name)}|${p.position}`),
-    )
-    .map((p) => p.player_id);
+  // 2b. Dedup cleanup. The same player can end up under multiple ids as
+  //     better data arrives: a draft:<pick> rankings-only fallback, then
+  //     a sleeper:<id> (matches rosters), then finally a real gsis once
+  //     nflverse catches up. When duplicates exist for one name+position,
+  //     keep the highest-priority id and remove the rest + their snapshots
+  //     so the player shows once. Priority: gsis > sleeper: > draft:.
+  const idPriority = (id: string): number =>
+    id.startsWith("draft:") ? 2 : id.startsWith("sleeper:") ? 1 : 0;
+  const byNameKey = new Map<string, typeof players>();
+  for (const p of players) {
+    const k = `${normalizeName(p.name)}|${p.position}`;
+    const arr = byNameKey.get(k) ?? [];
+    arr.push(p);
+    byNameKey.set(k, arr);
+  }
+  const staleIds: string[] = [];
+  for (const group of byNameKey.values()) {
+    if (group.length < 2) continue;
+    const bestPriority = Math.min(...group.map((p) => idPriority(p.player_id)));
+    for (const p of group) {
+      if (idPriority(p.player_id) > bestPriority) staleIds.push(p.player_id);
+    }
+  }
   if (staleIds.length > 0) {
     console.log(
-      `  cleanup: removing ${staleIds.length} sleeper-keyed rows now superseded by gsis rows`,
+      `  cleanup: removing ${staleIds.length} duplicate synthetic rows superseded by a higher-priority id`,
     );
     await sb.from("dpv_snapshots").delete().in("player_id", staleIds);
     await sb.from("dpv_history").delete().in("player_id", staleIds);
@@ -191,48 +199,81 @@ async function main() {
     draft_year: number;
     current_team: string | null;
   };
+  // Default birthdate for a class rookie (~22 at the late-April draft),
+  // used when no real birth_date is available so compute-dpv's age gate
+  // doesn't drop the player.
+  const defaultRookieBirthdate = (): string => {
+    const draftDay = Date.UTC(INCOMING_CLASS_YEAR, 3, 25);
+    return new Date(draftDay - 22 * 365.25 * 86400000)
+      .toISOString()
+      .slice(0, 10);
+  };
+
   const rows: Row[] = [];
-  let notInSleeper = 0;
+  let unresolved = 0;
   let viaGsis = 0;
   let viaSleeperId = 0;
+  let viaDraftFallback = 0;
   for (const pr of missing) {
     const key = `${normalizeName(pr.name)}|${pr.position}`;
     const sp = sleeperByKey.get(key);
-    if (!sp) {
-      notInSleeper++;
+
+    if (sp) {
+      const gsis = sp.gsis_id?.trim();
+      const playerId = gsis || `sleeper:${sp.player_id}`;
+      if (gsis) viaGsis++;
+      else viaSleeperId++;
+
+      // Birthdate: Sleeper birth_date → else derive from age → else default.
+      let birthdate: string | null = sp.birth_date ?? null;
+      if (!birthdate) {
+        const ageYears =
+          typeof sp.age === "number" && sp.age > 0 ? sp.age : 22;
+        const draftDay = Date.UTC(INCOMING_CLASS_YEAR, 3, 25);
+        birthdate = new Date(draftDay - ageYears * 365.25 * 86400000)
+          .toISOString()
+          .slice(0, 10);
+      }
+
+      rows.push({
+        player_id: playerId,
+        name: pr.name,
+        position: pr.position!,
+        birthdate,
+        draft_round: pr.projected_round,
+        draft_year: INCOMING_CLASS_YEAR,
+        current_team: fixTeam(sp.team),
+      });
       continue;
     }
-    const gsis = sp.gsis_id?.trim();
-    const playerId = gsis || `sleeper:${sp.player_id}`;
-    if (gsis) viaGsis++;
-    else viaSleeperId++;
 
-    // Birthdate: Sleeper birth_date → else derive from age → else
-    // default to a 22-year-old (draft ~ April 25) so compute-dpv's age
-    // gate doesn't drop them.
-    let birthdate: string | null = sp.birth_date ?? null;
-    if (!birthdate) {
-      const ageYears =
-        typeof sp.age === "number" && sp.age > 0 ? sp.age : 22;
-      const draftDay = Date.UTC(INCOMING_CLASS_YEAR, 3, 25);
-      birthdate = new Date(draftDay - ageYears * 365.25 * 86400000)
-        .toISOString()
-        .slice(0, 10);
+    // Not found in Sleeper (name mismatch, or not yet added). For a
+    // genuinely drafted prospect we still have an overall pick from the
+    // NFLVERSE draft sync — create a draft:<year>:<pick> row so they
+    // appear in rankings with a pick-precise prior. Rankings-only: no
+    // team (neutral landing spot) and won't match league rosters until a
+    // Sleeper or gsis row supersedes it (the dedup pass retires this
+    // then). compute-dpv's consensus name→pick fallback gives it pick
+    // precision. Skip only when there's no pick to key on.
+    const pick = pr.projected_overall_pick;
+    if (pick === null || pick === undefined) {
+      unresolved++;
+      continue;
     }
-
     rows.push({
-      player_id: playerId,
+      player_id: `draft:${INCOMING_CLASS_YEAR}:${pick}`,
       name: pr.name,
       position: pr.position!,
-      birthdate,
+      birthdate: defaultRookieBirthdate(),
       draft_round: pr.projected_round,
       draft_year: INCOMING_CLASS_YEAR,
-      current_team: fixTeam(sp.team),
+      current_team: null,
     });
+    viaDraftFallback++;
   }
 
   console.log(
-    `  resolved ${rows.length} (${viaGsis} via Sleeper gsis, ${viaSleeperId} via sleeper:id), ${notInSleeper} not found in Sleeper`,
+    `  resolved ${rows.length} (${viaGsis} via Sleeper gsis, ${viaSleeperId} via sleeper:id, ${viaDraftFallback} via draft:pick fallback), ${unresolved} unresolvable (no pick)`,
   );
 
   if (rows.length > 0) {

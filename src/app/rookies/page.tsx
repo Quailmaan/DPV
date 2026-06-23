@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createServerClient } from "@/lib/supabase/server";
-import { CURRENT_SEASON } from "@/lib/dpv/constants";
+import { upcomingProspectClassYear } from "@/lib/dpv/constants";
 import type { ScoringFormat } from "@/lib/dpv/types";
 import { fetchSleeperTeams, sleeperTeamKey } from "@/lib/sleeper/teams";
 import {
@@ -31,13 +31,12 @@ const PAGE_SIZE = 25;
 // Prospects and players are joined by normalized name (prospects predate
 // gsis_id assignment). Unmatched rows on either side are still rendered.
 
-const INCOMING_CLASS_YEAR = CURRENT_SEASON + 1;
-
 type SearchParams = Promise<{
   fmt?: string;
   pos?: string;
   sf?: string;
   page?: string;
+  year?: string;
 }>;
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
@@ -77,6 +76,19 @@ export default async function RookiesPage({
   const superflex = sp.sf === "1";
   const requestedPage = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
+  // Draft-cycle-aware class year. Defaults to the upcoming class (pivots
+  // May 1 after the NFL draft), with a toggle back to the just-drafted
+  // class — useful right after the draft for dynasty rookie-draft prep.
+  // Only those two years are offered: the board is forward-looking, and
+  // older classes have graduated into the main player pool.
+  const upcomingYear = upcomingProspectClassYear();
+  const justDraftedYear = upcomingYear - 1;
+  const yearOptions = [justDraftedYear, upcomingYear];
+  const requestedYear = parseInt(sp.year ?? "", 10);
+  const classYear = yearOptions.includes(requestedYear)
+    ? requestedYear
+    : upcomingYear;
+
   const sb = await createServerClient();
   // Pull all the data we need in parallel:
   //   - Prospect consensus rankings (pre-draft).
@@ -101,12 +113,12 @@ export default async function RookiesPage({
       .select(
         "prospect_id, name, position, avg_rank, normalized_grade, source_count, projected_round, projected_overall_pick",
       )
-      .eq("draft_year", INCOMING_CLASS_YEAR)
+      .eq("draft_year", classYear)
       .order("avg_rank", { ascending: true }),
     sb
       .from("players")
       .select("player_id, name, position, current_team, draft_round, draft_year")
-      .eq("draft_year", INCOMING_CLASS_YEAR),
+      .eq("draft_year", classYear),
     sb
       .from("combine_stats")
       .select("player_id, athleticism_score, forty, vertical, broad_jump"),
@@ -352,7 +364,7 @@ export default async function RookiesPage({
                     ? Number(pr.normalized_grade)
                     : null,
                 ageAtDraft: null,
-                draftYear: INCOMING_CLASS_YEAR,
+                draftYear: classYear,
               },
               team,
               teamContext: teamCtx,
@@ -492,18 +504,23 @@ export default async function RookiesPage({
   // Filter-bar links: any filter change resets pagination back to page 1
   // by intentionally NOT carrying the current `page` value forward.
   const buildHref = (
-    updates: Partial<{ fmt: string; pos: string; sf: string }>,
+    updates: Partial<{ fmt: string; pos: string; sf: string; year: string }>,
   ) => {
     const params = new URLSearchParams();
     const next = {
       fmt,
       pos,
       sf: superflex ? "1" : "",
+      year: String(classYear),
       ...updates,
     };
     if (next.fmt !== "HALF_PPR") params.set("fmt", next.fmt);
     if (next.pos && next.pos !== "ALL") params.set("pos", next.pos);
     if (next.sf === "1") params.set("sf", "1");
+    // Only carry year when it's not the default (upcoming) class.
+    if (next.year && Number(next.year) !== upcomingYear) {
+      params.set("year", next.year);
+    }
     const s = params.toString();
     return s ? `/rookies?${s}` : "/rookies";
   };
@@ -514,6 +531,7 @@ export default async function RookiesPage({
     if (fmt !== "HALF_PPR") params.set("fmt", fmt);
     if (pos && pos !== "ALL") params.set("pos", pos);
     if (superflex) params.set("sf", "1");
+    if (classYear !== upcomingYear) params.set("year", String(classYear));
     if (p > 1) params.set("page", String(p));
     const s = params.toString();
     return s ? `/rookies?${s}` : "/rookies";
@@ -532,7 +550,7 @@ export default async function RookiesPage({
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">
-          {INCOMING_CLASS_YEAR} Rookie Class
+          {classYear} Rookie Class
         </h1>
         <p className="text-sm text-zinc-500 mt-1">
           Pre-draft consensus grades + post-draft rookie prior PYV (draft
@@ -547,6 +565,29 @@ export default async function RookiesPage({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
+        {/* Class-year toggle. Defaults to the upcoming class (advances
+            after each NFL draft); flip back to the just-drafted class
+            for rookie-draft prep. */}
+        <div className="flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-sm">
+          {yearOptions.map((y) => (
+            <Link
+              key={y}
+              href={buildHref({ year: String(y) })}
+              title={
+                y === upcomingYear
+                  ? "Upcoming class — the next players to be drafted"
+                  : "Most recent draft class"
+              }
+              className={`px-3 py-1.5 tabular-nums ${
+                classYear === y
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
+              }`}
+            >
+              {y}
+            </Link>
+          ))}
+        </div>
         <div className="flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-sm">
           {FORMATS.map((f) => (
             <Link
