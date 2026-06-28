@@ -740,6 +740,14 @@ async function main() {
         (m, s) => Math.max(m, s.games_played ?? 0),
         0,
       );
+      // Player-pool rule: drop anyone who hasn't played a single game in
+      // 3 full seasons. For a draftee that means 3+ completed seasons since
+      // the draft with zero career games — a washout, not a prospect.
+      // (Drafted ≤2 seasons ago, or any games on record, stays.)
+      if (maxGamesPlayed === 0 && missedSeasons >= 3) {
+        skipped++;
+        continue;
+      }
       const intraClassDepthIdx =
         intraDepthByPlayer.get(p.player_id) ?? 0;
       const selfThreat = bucketThreat(
@@ -804,19 +812,20 @@ async function main() {
     }
 
     const mostRecent = rawSeasons[0];
-    // Skip retired players — defined as no NFL action (qualifying or not)
-    // within the last 2 seasons. The skip used to look at mostRecent (the
-    // ≥7g-filtered list), which incorrectly retired QBs whose only recent
-    // games were as backups — Sam Howell's 2024 was 1g for SEA, Dobbs'
-    // 2025 was 4g for NE. Both got frozen at their 2023 starter-year
-    // scores instead of being penalized as current backups. Use the
-    // unfiltered last season so they flow through and qbStarterRateMult
-    // can do its job.
+    // Player-pool rule: keep anyone who's played a game (qualifying or not)
+    // in the last 3 full seasons; drop only those inactive longer than that.
+    // CURRENT_SEASON-2 = the oldest of the last 3 seasons, so e.g. with
+    // CURRENT_SEASON 2025 we keep last-game-2023-or-later and drop
+    // last-game-2022-or-earlier. We look at the UNFILTERED last season
+    // (not the ≥7g list) so backup-only recent years still count as
+    // activity — Sam Howell's 1g 2024, Dobbs' 4g 2025 keep them in the
+    // pool (and qbStarterRateMult then handles their backup status)
+    // rather than freezing them at a stale starter-year score.
     const lastAnySeason = allSeasons.reduce(
       (m, s) => (s.season > m ? s.season : m),
       0,
     );
-    if (lastAnySeason < CURRENT_SEASON - 1) {
+    if (lastAnySeason < CURRENT_SEASON - 2) {
       skipped++;
       continue;
     }

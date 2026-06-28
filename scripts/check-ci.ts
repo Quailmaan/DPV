@@ -9,6 +9,8 @@
  *   npx tsx scripts/check-ci.ts          # last 8 runs
  *   npx tsx scripts/check-ci.ts 20       # last 20
  */
+export {}; // module marker so top-level fns don't collide with other scripts
+
 const REPO = "Quailmaan/DPV";
 const WORKFLOW = "refresh.yml";
 const H = { "User-Agent": "pylon-ci-check", Accept: "application/vnd.github+json" };
