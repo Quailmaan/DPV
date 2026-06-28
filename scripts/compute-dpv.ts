@@ -302,12 +302,13 @@ async function main() {
     `  ${advancedRows.length} rows, ${advancedByPlayer.size} unique players (using most recent season per player)`,
   );
 
-  console.log("Loading prospect_consensus names + grades + picks...");
+  console.log("Loading prospect_consensus names + grades + picks + rounds...");
   const prospectRows = await fetchAll<{
     name: string;
     draft_year: number | null;
     normalized_grade: number | null;
     projected_overall_pick: number | null;
+    projected_round: number | null;
   }>("prospect_consensus");
   // Only gate against names from the incoming + recently-drafted windows we
   // actually emit priors for. A cross-class normalized-name collision is
@@ -320,6 +321,11 @@ async function main() {
   // on sleeper:-keyed rookies (created by sync-rookie-existence) that
   // pickByGsis can't resolve because they have no gsis yet.
   const consensusPickByName = new Map<string, number>();
+  // Normalized name → draft round. Fallback when a rostered rookie made
+  // it into players (e.g. nflverse assigned a gsis) but with a null
+  // draft_round — without this they'd get UDFA-tier value instead of
+  // their real round.
+  const consensusRoundByName = new Map<string, number>();
   for (const pr of prospectRows) {
     if (
       pr.draft_year !== null &&
@@ -334,10 +340,13 @@ async function main() {
       if (pr.projected_overall_pick !== null) {
         consensusPickByName.set(key, Number(pr.projected_overall_pick));
       }
+      if (pr.projected_round !== null) {
+        consensusRoundByName.set(key, Number(pr.projected_round));
+      }
     }
   }
   console.log(
-    `  ${consensusNames.size} consensus names in window (${consensusGradeByName.size} grades, ${consensusPickByName.size} picks)`,
+    `  ${consensusNames.size} consensus names in window (${consensusGradeByName.size} grades, ${consensusPickByName.size} picks, ${consensusRoundByName.size} rounds)`,
   );
 
   console.log("Loading rookie_hsm_comps...");
@@ -681,10 +690,20 @@ async function main() {
       continue;
     }
 
-    const age = computeAge(p.birthdate);
+    // A recent draftee is a dynasty asset even if nflverse hasn't filled
+    // in their birth_date yet (fresh rookies often land in the roster file
+    // with a gsis + team but no birthdate). Don't drop them for a missing
+    // age — default to a typical rookie age so they still get priced.
+    const isRecentDrafteeForAge =
+      p.draft_year !== null && p.draft_year >= CURRENT_SEASON - 2;
+    let age = computeAge(p.birthdate);
     if (age === null) {
-      skipped++;
-      continue;
+      if (isRecentDrafteeForAge) {
+        age = 22;
+      } else {
+        skipped++;
+        continue;
+      }
     }
 
     const allSeasons = byPlayer.get(p.player_id) ?? [];
@@ -748,13 +767,19 @@ async function main() {
         skipped++;
         continue;
       }
+      // Effective draft round: prefer the players-table value, fall back to
+      // the consensus round when it's null (a rostered rookie nflverse
+      // added without draft_round would otherwise be priced as a UDFA
+      // instead of, say, a 5th-rounder).
+      const effectiveDraftRound =
+        p.draft_round ?? consensusRoundByName.get(normalizeName(p.name)) ?? null;
       const intraClassDepthIdx =
         intraDepthByPlayer.get(p.player_id) ?? 0;
       const selfThreat = bucketThreat(
         curve,
         p.position as Position,
         pickByGsis.get(p.player_id) ?? null,
-        p.draft_round,
+        effectiveDraftRound,
       );
       const rookieDisplacementMult =
         missedSeasons >= 1
@@ -771,7 +796,7 @@ async function main() {
       for (const fmt of FORMATS) {
         const prior = computeRookiePrior({
           position: p.position as Position,
-          draftRound: p.draft_round,
+          draftRound: effectiveDraftRound,
           // Overall pick — from nflverse draft_picks.csv (gsis → pick)
           // when available, else the consensus name fallback so
           // sleeper:-keyed rookies (no gsis yet) still price pick-precise.
@@ -801,7 +826,7 @@ async function main() {
           dpv: prior.dpv,
           tier: rookiePriorTier(
             p.position as Position,
-            p.draft_round,
+            effectiveDraftRound,
             missedSeasons,
           ),
           breakdown: prior.breakdown,
