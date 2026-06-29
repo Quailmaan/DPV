@@ -106,6 +106,12 @@ const STEPS: Step[] = [
     note: "Rookie HSM — pre-draft-profile nearest-neighbor projections",
   },
   {
+    name: "dedup-players",
+    cmd: TSX[0],
+    args: [TSX[1], "scripts/dedup-players.ts"],
+    note: "Collapse duplicate player rows (same person under gsis + synthetic/legacy ids) so they don't double in rankings or break roster name-resolution — runs before compute-dpv so it prices the reconciled set",
+  },
+  {
     name: "compute-dpv",
     cmd: TSX[0],
     args: [TSX[1], "scripts/compute-dpv.ts"],
