@@ -175,6 +175,16 @@ export async function syncSleeperLeague(
   const sb = adminClient();
   const nameIndex = new Map<string, string[]>();
   const dbNameIndex = new Map<string, string>();
+  // Last-name + position + team index. Resolves first-name spelling
+  // differences between Sleeper and nflverse (Sleeper "Matt Hibner" vs
+  // nflverse "Matthew Hibner", Mike/Michael, Will/William, etc.) that
+  // break the full-name match. lastname+pos+team is unique enough to be
+  // safe; arrays let us detect the rare ambiguous case and bail.
+  const lastNameTeamIndex = new Map<string, string[]>();
+  const lastToken = (name: string): string => {
+    const parts = normalizeName(name).split(" ").filter(Boolean);
+    return parts[parts.length - 1] ?? "";
+  };
   {
     const PAGE = 1000;
     for (let start = 0; ; start += PAGE) {
@@ -195,6 +205,10 @@ export async function syncSleeperLeague(
             `${normalizeName(row.name)}|${row.position}|${row.current_team}`,
             row.player_id,
           );
+          const lnKey = `${lastToken(row.name)}|${row.position}|${row.current_team}`;
+          const lnArr = lastNameTeamIndex.get(lnKey) ?? [];
+          lnArr.push(row.player_id);
+          lastNameTeamIndex.set(lnKey, lnArr);
         }
       }
       if (data.length < PAGE) break;
@@ -221,6 +235,15 @@ export async function syncSleeperLeague(
     const candidates = nameIndex.get(key);
     if (candidates && candidates.length === 1) return candidates[0];
     if (candidates && candidates.length > 1) return null; // ambiguous — skip
+
+    // Nickname fallback: full names didn't match (Sleeper "Matt Hibner"
+    // vs nflverse "Matthew Hibner"), so try last-name + position + team.
+    // Only resolve when it's unambiguous on that team.
+    if (sp.team) {
+      const lnKey = `${lastToken(name)}|${sp.position}|${sp.team === "LAR" ? "LA" : sp.team}`;
+      const lnMatch = lastNameTeamIndex.get(lnKey);
+      if (lnMatch && lnMatch.length === 1) return lnMatch[0];
+    }
 
     // Last resort: a fresh rookie (years_exp 0) that we don't have a
     // players row for yet gets a sleeper-keyed id, matching the row
