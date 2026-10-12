@@ -12,6 +12,9 @@ concurrency:
   group: refresh
   cancel-in-progress: false
 
+permissions:
+  contents: write # lets the keepalive step push an empty commit
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
@@ -47,3 +50,25 @@ jobs:
       # outside the core DPV pipeline, so they run after the rankings refresh.
       - name: Refresh synced Sleeper league rosters
         run: npx tsx scripts/sync-leagues.ts
+
+      # Keepalive. GitHub auto-disables a scheduled workflow after 60 days
+      # with no repo commits — which is exactly what silently froze this
+      # pipeline (last commit late June → disabled late Aug → rankings stale
+      # for weeks). If the latest commit is 50+ days old, push an empty
+      # commit to reset the timer so the schedule never lapses again. Runs
+      # only on scheduled runs, and only when actually needed (so history
+      # stays clean — ~1 commit every ~50 idle days). A GITHUB_TOKEN push
+      # doesn't retrigger workflows, so there's no loop.
+      - name: Keep schedule alive
+        if: github.event_name == 'schedule'
+        run: |
+          age_days=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Days since last commit: $age_days"
+          if [ "$age_days" -ge 50 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keepalive — prevent scheduled-workflow auto-disable"
+            git push
+          else
+            echo "Recent commit exists; no keepalive needed."
+          fi
