@@ -33,6 +33,14 @@ const sb = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
 });
 
 const FORMATS: ScoringFormat[] = ["STANDARD", "HALF_PPR", "FULL_PPR"];
+
+// Market boost. PYV is a production model and ignores FantasyCalc market
+// by default; when the market values a player meaningfully ABOVE their
+// PYV (perception / youth / draft-capital upside the model underweights),
+// nudge PYV up by this fraction of the gap. Up-only — market-low players
+// (notably QBs, Pylon's intentional production edge) are never lowered.
+// 0 disables it. See the market-vs-PYV divergence analysis.
+const MARKET_BOOST_FACTOR = 0.25;
 // Real wall-clock date. Earlier versions of this script hardcoded a
 // fixed date for repeatable local debugging, which silently broke the
 // dpv_history time-series — every nightly run was upserting to the same
@@ -1002,6 +1010,68 @@ async function main() {
   // inside each position alongside veterans so positional tier ordering is
   // consistent (rookie R1 RB slots in among mid-tier RB1/2s, etc.).
   const combined = [...ranked, ...priorSnapshots];
+
+  // ── Market boost ────────────────────────────────────────────────
+  // Nudge PYV toward FantasyCalc market when market sits above it (never
+  // below). Applied per scoring format on the FINAL values so it carries
+  // into rankings, the trade calculator, and the digest uniformly. Market
+  // is mean-anchored to the PYV scale per format (same global scaling the
+  // trade calculator uses) before comparing.
+  if (MARKET_BOOST_FACTOR > 0) {
+    const marketRows = await fetchAll<{
+      player_id: string;
+      market_value_normalized: number | null;
+      scoring_format: string;
+      source: string;
+    }>("market_values");
+    const marketByKey = new Map<string, number>();
+    for (const m of marketRows) {
+      if (m.source !== "fantasycalc" || m.market_value_normalized === null) {
+        continue;
+      }
+      marketByKey.set(
+        `${m.scoring_format}|${m.player_id}`,
+        Number(m.market_value_normalized),
+      );
+    }
+    // Global PYV↔market scale per format (mean-anchoring over the players
+    // that have both), so a raw market number is comparable to PYV.
+    const scaleByFmt = new Map<string, number>();
+    for (const fmt of FORMATS) {
+      let sp = 0;
+      let sm = 0;
+      for (const c of combined) {
+        if (c.scoring_format !== fmt) continue;
+        const mv = marketByKey.get(`${fmt}|${c.player_id}`);
+        if (mv === undefined) continue;
+        sp += c.dpv;
+        sm += mv;
+      }
+      scaleByFmt.set(fmt, sm > 0 ? sp / sm : 1);
+    }
+    let boosted = 0;
+    for (const c of combined) {
+      const mv = marketByKey.get(`${c.scoring_format}|${c.player_id}`);
+      if (mv === undefined) continue;
+      const scaled = mv * (scaleByFmt.get(c.scoring_format) ?? 1);
+      if (scaled <= c.dpv) continue; // market-low → leave alone
+      const pre = c.dpv;
+      c.dpv = Math.round(pre + MARKET_BOOST_FACTOR * (scaled - pre));
+      // Annotate the breakdown for transparency (additive — existing
+      // breakdown consumers ignore the extra key).
+      if (c.breakdown && typeof c.breakdown === "object") {
+        (c.breakdown as Record<string, unknown>).marketBoost = {
+          factor: MARKET_BOOST_FACTOR,
+          preBoostDpv: pre,
+          scaledMarket: Math.round(scaled),
+        };
+      }
+      boosted++;
+    }
+    console.log(
+      `Market boost (${MARKET_BOOST_FACTOR}): lifted ${boosted} players toward market`,
+    );
+  }
 
   console.log("Writing dpv_snapshots...");
   const BATCH = 500;
